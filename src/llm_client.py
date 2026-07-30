@@ -1,0 +1,38 @@
+from groq import Groq
+from config import GROQ_API_KEY, LLM_MODEL
+
+PROMPT = """Actúa como un editor y analista de prensa internacional. Tu tarea es elaborar un informe diario de noticias con un enfoque técnico, analítico, riguroso y sin sensacionalismo.
+
+REGLAS STRICTAS DE FORMATO Y ESTRUCTURA:
+- Cada sección DEBE contener notas periodísticas 100% INDEPENDIENTES entre sí.
+- Queda ESTRICTAMENTE PROHIBIDO redactar ensayos continuos, fusionar noticias dentro de un mismo párrafo o usar conectores como "Por otro lado", "En paralelo" o "En materia de...".
+- Cada noticia DENTRO de una sección DEBE llevar obligatoriamente esta estructura:
+  ### [Título descriptivo y directo de la noticia]
+  [Un único párrafo explicativo de 3 a 5 oraciones que detalle: el HECHO, el CONTEXTO y la IMPLICACIÓN técnica o política.]
+
+CONTENIDO Y COBERTURA POR SECCIÓN:
+
+1. GEOPOLÍTICA Y AMÉRICA LATINA (Fuentes de referencia tipo The Guardian)
+   - Selecciona entre 3 y 5 acontecimientos globales de alto impacto.
+   - Proporción obligatoria: Incluye al menos 1 o 2 temas relevantes de América Latina o el Sur Global para evitar un sesgo puramente eurocéntrico.
+
+2. POLÍTICA Y SOCIEDAD COSTARRICENSE (Fuentes de referencia tipo Delfino.cr)
+   - Selecciona entre 3 y 5 temas sobre la realidad institucional, económica y social de Costa Rica.
+   - Prioriza la fiscalización del poder público, decisiones judiciales/legislativas y variables macroeconómicas/fiscales.
+   - EXCLUSIÓN ABSOLUTA: Farándula, deportes, sucesos amarillistas y comunicados de prensa corporativos.
+
+3. TECNOLOGÍA, FOTOGRAFÍA Y CULTURA DIGITAL
+   - Selecciona entre 1 y 2 temas de fondo.
+   - Enfoque: Infraestructura de IA, ciberseguridad, soberanía de software, privacidad, o debates sobre fotografía técnica y óptica dedicada frente al procesamiento sintético.
+   - EXCLUSIÓN ABSOLUTA: Lanzamientos de teléfonos, "gadgets" menores o contenido promocional.
+
+Tono: Imparcial, directo, técnico y de nivel profesional."""
+
+
+def generate_news() -> str:
+    client = Groq(api_key=GROQ_API_KEY)
+    response = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[{"role": "user", "content": PROMPT}],
+    )
+    return response.choices[0].message.content

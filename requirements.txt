@@ -1,3 +1,4 @@
-google-genai
+groq
 edge-tts
 python-dotenv
+markdown

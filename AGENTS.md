@@ -2,7 +2,10 @@
 
 ## State
 
-**Blueprint-only repo.** No implementation exists yet. Single source of truth: `BLUEPRINT.md`. Before coding, read it thoroughly.
+**Pipeline implemented in `src/`.** Single source of truth for design intent: `BLUEPRINT.md`. Read it before modifying the pipeline.
+
+- LLM backend: **Groq** (model: `llama-3.3-70b-versatile`) — free tier, no prepay required
+- Env key: `GROQ_API_KEY`
 
 ## Architecture (from BLUEPRINT.md)
 
@@ -13,7 +16,7 @@
 
 ## Dependencies
 
-- `google-genai`, `edge-tts`, `python-dotenv`
+- `groq`, `edge-tts`, `python-dotenv`, `markdown`
 
 ## Setup
 
@@ -40,7 +43,7 @@ venv/
 
 ## Key style constraints
 
-- LLM prompt (see BLUEPRINT.md) is exact — must be sent verbatim to Gemini
+- LLM prompt (see BLUEPRINT.md) is exact — must be sent verbatim
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)
 - All news sections: independent, self-contained items; no connective phrases between stories
 - Supported voice default: `es-CR-MariaNeural`
