@@ -5,9 +5,11 @@ from email.mime.audio import MIMEAudio
 from config import *
 
 
-def send(html_content: str, audio_bytes: bytes) -> None:
+def send(html_content: str, audio_bytes: bytes, date_stamp: str) -> None:
+    mp3_filename = f"digest13.{date_stamp}.mp3"
+
     msg = MIMEMultipart("related")
-    msg["Subject"] = "Digest 13 - Informe Diario"
+    msg["Subject"] = f"Digest 13 - Informe Diario - {date_stamp}"
     msg["From"] = EMAIL_FROM
     msg["To"] = EMAIL_TO
 
@@ -17,7 +19,7 @@ def send(html_content: str, audio_bytes: bytes) -> None:
     msg_alt.attach(MIMEText(html_content, "html", "utf-8"))
 
     audio_part = MIMEAudio(audio_bytes, _subtype="mpeg")
-    audio_part.add_header("Content-Disposition", "inline", filename="resumen.mp3")
+    audio_part.add_header("Content-Disposition", "inline", filename=mp3_filename)
     audio_part.add_header("Content-ID", "<audio_resumen_mp3>")
     msg.attach(audio_part)
 
