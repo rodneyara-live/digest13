@@ -163,17 +163,17 @@ REGLAS STRICTAS DE FORMATO Y ESTRUCTURA:
 CONTENIDO Y COBERTURA POR SECCIÓN:
 
 1. GEOPOLÍTICA Y AMÉRICA LATINA (Fuentes de referencia tipo The Guardian)
-   - Selecciona entre 3 y 5 acontecimientos globales de alto impacto.
-   - Proporción obligatoria: Incluye al menos 1 o 2 temas relevantes de América Latina o el Sur Global para evitar un sesgo puramente eurocéntrico.
+   - Selecciona hasta 6 acontecimientos globales de alto impacto.
+   - Proporción obligatoria: Incluye al menos 2 temas relevantes de América Latina o el Sur Global para evitar un sesgo puramente eurocéntrico.
 
 2. POLÍTICA Y SOCIEDAD COSTARRICENSE (Fuentes: Delfino.cr, Semanario Universidad)
-   - Selecciona entre 3 y 5 temas sobre la realidad institucional, económica y social de Costa Rica.
+   - Selecciona hasta 6 temas sobre la realidad institucional, económica y social de Costa Rica.
    - Incluye al menos 1 o 2 noticias de Semanario Universidad por tirada.
    - Prioriza la fiscalización del poder público, decisiones judiciales/legislativas y variables macroeconómicas/fiscales.
    - EXCLUSIÓN ABSOLUTA: Farándula, deportes, sucesos amarillistas y comunicados de prensa corporativos.
 
 3. TECNOLOGÍA, FOTOGRAFÍA Y CULTURA DIGITAL
-   - Selecciona entre 1 y 2 temas de fondo.
+   - Selecciona entre 2 y 4 temas de fondo.
    - Enfoque: Infraestructura de IA, ciberseguridad, soberanía de software, privacidad, o debates sobre fotografía técnica y óptica dedicada frente al procesamiento sintético.
    - EXCLUSIÓN ABSOLUTA: Lanzamientos de teléfonos, "gadgets" menores o contenido promocional.
 
