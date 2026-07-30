@@ -1,6 +1,17 @@
 import feedparser
+from dataclasses import dataclass, field
 
-SOURCE_MAP = {
+
+@dataclass
+class Item:
+    section: str
+    title: str
+    source: str
+    url: str
+    summary: str
+
+
+SOURCE_MAP: dict[str, str] = {
     "theguardian.com": "The Guardian",
     "bbc.co.uk": "BBC News",
     "aljazeera.com": "Al Jazeera",
@@ -9,7 +20,7 @@ SOURCE_MAP = {
     "arstechnica.com": "Ars Technica",
 }
 
-FEEDS = [
+FEEDS: list[tuple[str, list[str]]] = [
     ("GEOPOLÍTICA Y AMÉRICA LATINA", [
         "https://www.theguardian.com/world/rss",
         "https://www.theguardian.com/world/americas/rss",
@@ -20,7 +31,7 @@ FEEDS = [
         "https://delfino.cr/feed",
         "https://semanariouniversidad.com/feed",
     ]),
-    ("TECNOLOGÍA FOTOGRAFÍA Y CULTURA DIGITAL", [
+    ("TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE", [
         "https://www.theguardian.com/technology/rss",
         "https://feeds.arstechnica.com/arstechnica/index",
     ]),
@@ -36,12 +47,11 @@ def _source_name(url: str) -> str:
     return url.split("//")[1].split("/")[0]
 
 
-def fetch_news_context() -> str:
-    parts: list[str] = []
+def fetch_items() -> list[Item]:
+    items: list[Item] = []
     seen: set[str] = set()
 
     for section_name, urls in FEEDS:
-        parts.append(f"## {section_name}")
         for url in urls:
             try:
                 feed = feedparser.parse(url)
@@ -50,19 +60,24 @@ def fetch_news_context() -> str:
                 for entry in feed.entries:
                     title = (entry.get("title") or "").strip()
                     summary = (entry.get("summary") or entry.get("description") or "").strip()
+                    link = entry.get("link") or ""
                     if not title and not summary:
                         continue
                     key = title or summary[:80]
                     if key in seen:
                         continue
                     seen.add(key)
-                    snippet = summary[:300].replace("\n", " ")
-                    parts.append(f"- [{source}] {title}: {snippet}")
+                    items.append(Item(
+                        section=section_name,
+                        title=title,
+                        source=source,
+                        url=link,
+                        summary=summary[:500],
+                    ))
                     count += 1
                     if count >= MAX_PER_FEED:
                         break
             except Exception:
                 continue
-        parts.append("")
 
-    return "\n".join(parts)
+    return items

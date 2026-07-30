@@ -3,3 +3,6 @@ edge-tts
 python-dotenv
 markdown
 feedparser
+httpx
+beautifulsoup4
+trafilatura
