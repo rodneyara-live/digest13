@@ -21,20 +21,21 @@ flowchart TD
         A["⏱️ systemd.timer<br/>(7:00 AM / Persistent=true)"]:::systemd --> B["🐍 script: main.py"]:::script
 
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
-            B --> C["🤖 Google AI Studio API<br/>(Texto Curado LLM)"]:::api
-            B --> D["🗣️ edge-tts Engine<br/>(Sintetiza MP3)"]:::api
-            B --> E["🎨 HTML Generator<br/>(Ensambla Plantilla)"]:::api
+            B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
+            C --> D["🤖 Groq API (LLaMA 3.3 70B)<br/>(Texto Curado LLM)"]:::api
+            B --> E["🗣️ edge-tts Engine<br/>(Sintetiza MP3)"]:::api
+            B --> F["🎨 HTML Generator<br/>(Ensambla Plantilla)"]:::api
 
-            C --> F["📦 MIME Package Builder<br/>(HTML + Audio Incrustado)"]:::process
-            D --> F
-            E --> F
+            D --> G["📦 MIME Package Builder<br/>(HTML + Audio Incrustado)"]:::process
+            E --> G
+            F --> G
         end
 
-        F --> G["📤 SMTP Transport Engine"]:::script
+        G --> H["📤 SMTP Transport Engine"]:::script
     end
 
-    G --> H["🛡️ Servicio SMTP / Proton Mail"]:::client
-    H --> I["📬 Cliente de Correo<br/>(Thunderbird Desktop / Mobile)"]:::client
+    H --> I["🛡️ Servicio SMTP / Brevo"]:::client
+    I --> J["📬 Cliente de Correo<br/>(Thunderbird Desktop / Mobile)"]:::client
 ```
 
 ---
@@ -44,13 +45,15 @@ flowchart TD
 * **Sistema Operativo:** Linux (Probado y optimizado para Ubuntu 24.04 LTS / 26.04 LTS).
 * **Lenguaje:** Python 3.10 o superior.
 * **Dependencias de Python:**
-* `google-genai` (Cliente oficial de la API de Gemini).
+* `groq` (Cliente oficial de la API de Groq).
 * `edge-tts` (Síntesis de voz neuronal de Microsoft Edge).
 * `python-dotenv` (Manejo de variables de entorno).
+* `markdown` (Conversión Markdown → HTML).
+* `feedparser` (Consumo de fuentes RSS).
 
 * **Servicios Externos:**
-* API Key de Google AI Studio (Gratuito / Tier Estándar).
-* Cuenta de correo dedicada para el envío de notificaciones (se recomienda usar una cuenta aislada como Proton Mail con credenciales dedicadas para minimizar riesgos de seguridad).
+* API Key de Groq (Gratuito / Sin prepago necesario).
+* Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
 
@@ -94,22 +97,51 @@ pip install -r requirements.txt
 Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al repositorio Git**.
 
 ```ini
-# Configuración de Google AI Studio API
-GEMINI_API_KEY="AIzaSyYourAPIKeyHere..."
+# Configuración de Groq API
+GROQ_API_KEY="gsk_tu_api_key_aqui..."
+LLM_MODEL="llama-3.3-70b-versatile"
 
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
 
-# Configuración SMTP (Cuenta de envío aislada - p. ej. Proton Mail)
-SMTP_SERVER="127.0.0.1"        # O el servidor SMTP de tu proveedor aislado
-SMTP_PORT=1025                 # Puerto correspondiente
-SMTP_USERNAME="tu_usuario_noticias"
-SMTP_PASSWORD="tu_password_de_aplicacion"
+# Configuración SMTP
+SMTP_SERVER="smtp-relay.brevo.com"
+SMTP_PORT=587
+SMTP_USERNAME="tu_usuario_smtp"
+SMTP_PASSWORD="tu_password_smtp"
 
 # Remitente y Destinatario
-EMAIL_FROM="noticias-bot@domain.com"
-EMAIL_TO="tu_cuenta_proton@proton.me"
+EMAIL_FROM="remitente@verified.com"
+EMAIL_TO="destino@correo.com"
 ```
+
+---
+
+## 📡 Fuentes RSS Agregadas
+
+El pipeline recolecta titulares y sumarios de las siguientes fuentes RSS antes de enviarlos al LLM como contexto:
+
+| Sección | Fuentes RSS |
+|---------|-------------|
+| Geopolítica y América Latina | The Guardian (world + americas), BBC News, Al Jazeera |
+| Política y Sociedad Costarricense | Delfino.cr, Semanario Universidad |
+| Tecnología y Cultura Digital | The Guardian (technology), Ars Technica |
+
+Cada entrada incluye su fuente (`[The Guardian]`), y el prompt exige citar `(Fuente: ...)` al final de cada noticia. El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
+
+---
+
+## 🗣️ Limpieza de Texto para TTS
+
+Antes de la síntesis de voz, el texto markdown generado por el LLM se limpia mediante `text_cleaner.strip_markdown()` para eliminar:
+- Encabezados (`#` a `######`)
+- Negritas (`**texto**`) y cursivas (`*texto*`)
+- Enlaces markdown (`[texto](url)`)
+- Código inline (`` `codigo` ``)
+- Listas (`- `, `1. `)
+- Citas (`> `)
+
+Esto evita que el TTS lea en voz alta símbolos de formato.
 
 ---
 
@@ -126,6 +158,7 @@ REGLAS STRICTAS DE FORMATO Y ESTRUCTURA:
 - Cada noticia DENTRO de una sección DEBE llevar obligatoriamente esta estructura:
   ### [Título descriptivo y directo de la noticia]
   [Un único párrafo explicativo de 3 a 5 oraciones que detalle: el HECHO, el CONTEXTO y la IMPLICACIÓN técnica o política.]
+  *(Fuente: [Nombre del medio])*
 
 CONTENIDO Y COBERTURA POR SECCIÓN:
 
@@ -133,8 +166,9 @@ CONTENIDO Y COBERTURA POR SECCIÓN:
    - Selecciona entre 3 y 5 acontecimientos globales de alto impacto.
    - Proporción obligatoria: Incluye al menos 1 o 2 temas relevantes de América Latina o el Sur Global para evitar un sesgo puramente eurocéntrico.
 
-2. POLÍTICA Y SOCIEDAD COSTARRICENSE (Fuentes de referencia tipo Delfino.cr)
+2. POLÍTICA Y SOCIEDAD COSTARRICENSE (Fuentes: Delfino.cr, Semanario Universidad)
    - Selecciona entre 3 y 5 temas sobre la realidad institucional, económica y social de Costa Rica.
+   - Incluye al menos 1 o 2 noticias de Semanario Universidad por tirada.
    - Prioriza la fiscalización del poder público, decisiones judiciales/legislativas y variables macroeconómicas/fiscales.
    - EXCLUSIÓN ABSOLUTA: Farándula, deportes, sucesos amarillistas y comunicados de prensa corporativos.
 
@@ -224,7 +258,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/ruta/a/tu/proyecto/digest-13
-ExecStart=/ruta/a/tu/proyecto/digest-13/venv/bin/python main.py
+ExecStart=/ruta/a/tu/proyecto/digest-13/venv/bin/python src/main.py
 
 [Install]
 WantedBy=default.target
@@ -264,6 +298,7 @@ La directiva `Persistent=true` asegura que si la máquina estaba apagada a las 7
    venv/
    .cache/
    .env
+   __pycache__/
    *.mp3
    *.html
    ```

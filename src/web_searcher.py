@@ -1,0 +1,68 @@
+import feedparser
+
+SOURCE_MAP = {
+    "theguardian.com": "The Guardian",
+    "bbc.co.uk": "BBC News",
+    "aljazeera.com": "Al Jazeera",
+    "delfino.cr": "Delfino.cr",
+    "semanariouniversidad.com": "Semanario Universidad",
+    "arstechnica.com": "Ars Technica",
+}
+
+FEEDS = [
+    ("GEOPOLÍTICA Y AMÉRICA LATINA", [
+        "https://www.theguardian.com/world/rss",
+        "https://www.theguardian.com/world/americas/rss",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.aljazeera.com/xml/rss/all.xml",
+    ]),
+    ("POLÍTICA Y SOCIEDAD COSTARRICENSE", [
+        "https://delfino.cr/feed",
+        "https://semanariouniversidad.com/feed",
+    ]),
+    ("TECNOLOGÍA FOTOGRAFÍA Y CULTURA DIGITAL", [
+        "https://www.theguardian.com/technology/rss",
+        "https://feeds.arstechnica.com/arstechnica/index",
+    ]),
+]
+
+MAX_PER_FEED = 6
+
+
+def _source_name(url: str) -> str:
+    for domain, name in SOURCE_MAP.items():
+        if domain in url:
+            return name
+    return url.split("//")[1].split("/")[0]
+
+
+def fetch_news_context() -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    for section_name, urls in FEEDS:
+        parts.append(f"## {section_name}")
+        for url in urls:
+            try:
+                feed = feedparser.parse(url)
+                source = _source_name(url)
+                count = 0
+                for entry in feed.entries:
+                    title = (entry.get("title") or "").strip()
+                    summary = (entry.get("summary") or entry.get("description") or "").strip()
+                    if not title and not summary:
+                        continue
+                    key = title or summary[:80]
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    snippet = summary[:300].replace("\n", " ")
+                    parts.append(f"- [{source}] {title}: {snippet}")
+                    count += 1
+                    if count >= MAX_PER_FEED:
+                        break
+            except Exception:
+                continue
+        parts.append("")
+
+    return "\n".join(parts)

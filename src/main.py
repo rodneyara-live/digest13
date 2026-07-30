@@ -7,6 +7,7 @@ from html_generator import build_html
 from text_cleaner import strip_markdown
 from tts_engine import synthesize
 from email_sender import send
+from web_searcher import fetch_news_context
 
 DATE_STAMP = date.today().strftime("%Y.%m.%d")
 MP3_FILENAME = f"digest13.{DATE_STAMP}.mp3"
@@ -14,8 +15,12 @@ HTML_FILENAME = f"digest13.{DATE_STAMP}.html"
 
 
 def main() -> None:
+    print("Buscando noticias en la web...")
+    web_context = fetch_news_context()
+    print(f"Contexto web recopilado ({len(web_context)} caracteres).")
+
     print("Generando noticias...")
-    news_text = generate_news()
+    news_text = generate_news(context=web_context)
 
     html_path = PROJECT_ROOT / HTML_FILENAME
     print("Construyendo HTML...")

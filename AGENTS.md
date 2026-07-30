@@ -9,20 +9,21 @@
 
 ## Architecture (from BLUEPRINT.md)
 
-- Python 3.10+ pipeline: LLM query (Google AI Studio / Gemini) → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
+- Python 3.10+ pipeline: RSS feeds → LLM (Groq) → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
+- RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
 - Local cache isolation: redirect all cache/temp dirs under `.cache/` (set `HF_HOME`, `XDG_CACHE_HOME`, `TORCH_HOME` at module init)
 - GPU path (future): detect `cuda`, use `float16` or INT4 quantization for 4GB VRAM (NVIDIA Quadro T2000)
 
 ## Dependencies
 
-- `groq`, `edge-tts`, `python-dotenv`, `markdown`
+- `groq`, `edge-tts`, `python-dotenv`, `markdown`, `feedparser`
 
 ## Setup
 
 ```bash
 python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-cp .env.example .env  # fill in GEMINI_API_KEY, SMTP_*, EMAIL_*, TTS_VOICE
+cp .env.example .env  # fill in GROQ_API_KEY, SMTP_*, EMAIL_*, TTS_VOICE
 ```
 
 `.env` is required at project root — never commit it.
@@ -43,7 +44,10 @@ venv/
 
 ## Key style constraints
 
-- LLM prompt (see BLUEPRINT.md) is exact — must be sent verbatim
+- LLM prompt (see BLUEPRINT.md) is exact — must be sent verbatim. When RSS context is available, it's prepended with a citation instruction.
+- Each news item ends with its source attribution (`(Fuente: ...)`)
+- Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis
+- Temp files (MP3, HTML) deleted after successful email send
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)
 - All news sections: independent, self-contained items; no connective phrases between stories
 - Supported voice default: `es-CR-MariaNeural`
