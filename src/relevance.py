@@ -69,7 +69,7 @@ def filter_items(items: list[Item]) -> list[Item]:
             source=item.source,
             summary=item.summary[:500],
         )
-        answer = call_llm(SYSTEM_PROMPT, user, max_tokens=300)
+        answer = call_llm(SYSTEM_PROMPT, user, max_tokens=600)
         if not answer:
             print(f"  ERROR: sin respuesta para {item.title[:60]}")
             continue

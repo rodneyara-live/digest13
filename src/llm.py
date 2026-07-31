@@ -25,6 +25,9 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+            finish = response.choices[0].finish_reason
+            if finish == "length":
+                print(f"  ⚠ TRUNCADO: finish_reason=length (max_tokens={max_tokens})")
             return response.choices[0].message.content.strip()
         except Exception as e:
             error = str(e)

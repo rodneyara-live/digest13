@@ -32,9 +32,7 @@ def fetch_full_text(url: str) -> str | None:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
-        content = resp.content
-        if content[:2] == b"\x1f\x8b":
-            content = gzip.decompress(content)
+        content = _decompress(resp.content)
         html = content.decode("utf-8", errors="replace")
         text = trafilatura.extract(html)
         if text and len(text.strip()) > 100:
