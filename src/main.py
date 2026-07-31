@@ -1,10 +1,11 @@
 import asyncio
+import re
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from config import PROJECT_ROOT
 from web_searcher import fetch_items
-from relevance import filter_items
+from relevance import filter_items, deduplicate_by_event
 from article_fetcher import fetch_full_text
 from paragraph_gen import generate_paragraph
 from editorial_review import review
@@ -39,6 +40,40 @@ def _section_rank(section: str) -> int:
         return 99
 
 
+_ACCENTS = str.maketrans("áéíóúüñ", "aeiouun")
+_STOPWORDS = {
+    "a", "al", "ante", "bajo", "como", "con", "contra", "de", "del", "desde",
+    "donde", "durante", "e", "el", "en", "entre", "era", "es", "esta", "estas",
+    "este", "esto", "fue", "ha", "hacia", "han", "hasta", "la", "las", "le",
+    "lo", "los", "mas", "mediante", "mientras", "o", "para", "por", "que", "se",
+    "según", "sin", "sobre", "su", "sus", "tras", "un", "una", "y", "ya",
+    "and", "are", "at", "be", "been", "by", "for", "from", "has", "have", "he",
+    "in", "is", "it", "not", "of", "on", "says", "said", "that", "the", "their",
+    "they", "this", "to", "was", "were", "with", "will", "after", "over",
+}
+
+
+def _keywords(text: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", text.lower().translate(_ACCENTS))
+    return {w for w in words if w not in _STOPWORDS and len(w) > 2}
+
+
+def _similarity(a: str, b: str) -> float:
+    ka, kb = _keywords(a), _keywords(b)
+    if not ka or not kb:
+        return 0.0
+    return len(ka & kb) / len(ka | kb)
+
+
+def _is_duplicate(item, selected: list) -> bool:
+    text = f"{item.title} {item.summary[:300]}"
+    for sel in selected:
+        other = f"{sel.title} {sel.summary[:300]}"
+        if _similarity(text, other) >= 0.65:
+            return True
+    return False
+
+
 def select_by_quota(items: list) -> list:
     by_section: dict[str, list] = defaultdict(list)
     for item in items:
@@ -50,15 +85,18 @@ def select_by_quota(items: list) -> list:
     selected: list = []
     counts: dict[str, int] = defaultdict(int)
 
-    # Pass 1: force minimum for Costa Rica
+    # Pass 1: force minimum for Costa Rica (distinct stories)
     cr_key = "POLÍTICA Y SOCIEDAD COSTARRICENSE"
     cr_min = SECTION_QUOTAS.get(cr_key, {}).get("min", 0)
-    cr_items = by_section.get(cr_key, [])
-    for item in cr_items[:cr_min]:
+    for item in by_section.get(cr_key, []):
+        if counts[cr_key] >= cr_min:
+            break
+        if _is_duplicate(item, selected):
+            continue
         selected.append(item)
         counts[cr_key] += 1
 
-    # Pass 2: global ranking by score, respecting caps
+    # Pass 2: global ranking by score, respecting caps and skipping duplicates
     remaining = sorted(
         [i for i in items if i not in selected],
         key=lambda i: (-i.score, i.title),
@@ -69,6 +107,8 @@ def select_by_quota(items: list) -> list:
         sec = item.section
         sec_max = SECTION_QUOTAS.get(sec, {}).get("max", 999)
         if counts[sec] >= sec_max:
+            continue
+        if _is_duplicate(item, selected):
             continue
         selected.append(item)
         counts[sec] += 1
@@ -104,6 +144,10 @@ def main() -> None:
     if not approved:
         print("ERROR: Ningún item superó el filtro de relevancia")
         return
+
+    print("Deduplicando por evento...")
+    approved = deduplicate_by_event(approved)
+    print(f"  {len(approved)} items tras dedup")
 
     print(f"Seleccionando por puntaje y cuotas...")
     selected = select_by_quota(approved)

@@ -7,12 +7,13 @@
 - LLM backend: **Groq** (model: `openai/gpt-oss-120b`) — free tier, no prepay required
 - Env key: `GROQ_API_KEY`
 - Model is a *reasoning* model: it spends tokens on chain-of-thought before answering, so `max_tokens` must be generous (relevance=300, paragraph=600, editorial review=1500) or it returns empty strings
-- Groq free tier: **200K tokens/day** for `gpt-oss-120b`. One daily run uses ~60-70K. `call_llm` retries on 429 rate limits (3 attempts, 30-60s backoff)
+- Groq free tier: **100K tokens/day** for `llama-3.3-70b-versatile` (pipeline volume), **200K tokens/day** for `openai/gpt-oss-120b` (editorial review). One daily run uses ~60-70K. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion fails fast (no futile retries)
 
 ## Architecture (from BLUEPRINT.md)
 
-- Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → quota-based selection → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
+- Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → LLM dedup by event → quota-based selection → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
 - Selection quotas (`main.py`): Costa Rica min 3 / max 5, Geopolítica max 6, Tecnología max 5, total max 15 items (~10-12 min audio)
+- Editorial review uses a separate reasoning model (`EDITORIAL_MODEL`, default `openai/gpt-oss-120b`) — gives it a distinct daily quota
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
 - Local cache isolation: redirect all cache/temp dirs under `.cache/` (set `HF_HOME`, `XDG_CACHE_HOME`, `TORCH_HOME` at module init)
@@ -22,11 +23,11 @@
 
 - `main.py` — orchestrator + `select_by_quota()`
 - `web_searcher.py` — RSS aggregation (6 items/feed max)
-- `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section)
+- `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection)
 - `article_fetcher.py` — `requests` + manual gzip/br decompression + `trafilatura` (Semanario needs this)
 - `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=600)
-- `editorial_review.py` — second-pass review (max_tokens=1500)
-- `llm.py` — Groq client, retries on 429 (3 attempts, 30-60s backoff)
+- `editorial_review.py` — second-pass review (max_tokens=1500, `EDITORIAL_MODEL`)
+- `llm.py` — Groq client, retries on transient 429 only, `model` param per call
 - `html_generator.py`, `text_cleaner.py`, `tts_engine.py`, `email_sender.py` — output stage
 
 ## Dependencies

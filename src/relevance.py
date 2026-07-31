@@ -97,3 +97,71 @@ def filter_items(items: list[Item]) -> list[Item]:
         print(f"  APROBADO (score={score}): {item.title[:60]} — {reason}")
 
     return approved
+
+
+DEDUP_SYSTEM_PROMPT = "Eres un editor de noticias que agrupa reportajes del mismo evento."
+
+DEDUP_USER_PROMPT = """Estos son los titulares aprobados para el boletín (ID, sección, fuente, título):
+
+{items}
+
+Agrupa únicamente los items que cubren el MISMO evento o la MISMA noticia de fondo (misma crisis, mismo incidente, mismo tema específico). No agrupes temas simplemente relacionados o de la misma región: "dos reportajes distintos sobre la misma guerra" NO son duplicados; "dos reportajes sobre el MISMO ataque/incidente/crisis puntual" sí.
+
+Por cada grupo de duplicados responde una línea:
+
+GRUPO: [IDs separados por coma]
+
+Si no hay duplicados responde solo: SIN DUPLICADOS"""
+
+
+def _parse_groups(answer: str) -> list[list[int]]:
+    groups: list[list[int]] = []
+    for m in re.finditer(r"GRUPO\s*:\s*([\d,\s]+)", answer, re.IGNORECASE):
+        ids = [int(x) for x in re.findall(r"\d+", m.group(1))]
+        if len(ids) >= 2:
+            groups.append(ids)
+    return groups
+
+
+def deduplicate_by_event(items: list[Item]) -> list[Item]:
+    if len(items) < 4:
+        return items
+
+    # Only the top candidates by score can make the digest; dedup where it matters
+    pool = sorted(items, key=lambda i: (-i.score, i.title))[:20]
+    lines = []
+    for i, item in enumerate(pool, 1):
+        title = item.title.replace("\n", " ")[:120]
+        summary = re.sub(r"\s+", " ", item.summary[:150]).strip()
+        lines.append(f"{i}. [{item.section[:20]}] {item.source} | {title} — {summary}")
+
+    answer = call_llm(DEDUP_SYSTEM_PROMPT, DEDUP_USER_PROMPT.format(items="\n".join(lines)), max_tokens=300)
+    if not answer:
+        print("  (dedup: sin respuesta, se omite)")
+        return items
+
+    groups = _parse_groups(answer)
+    if not groups:
+        print("  (dedup: SIN DUPLICADOS)")
+        return items
+
+    drop: set[int] = set()
+    for group in groups:
+        group = [g for g in group if 1 <= g <= len(pool)]
+        if len(group) < 2:
+            continue
+        best = max(group, key=lambda g: pool[g - 1].score)
+        for g in group:
+            if g != best:
+                drop.add(g)
+
+    if not drop:
+        print("  (dedup: SIN DUPLICADOS)")
+        return items
+
+    dropped = {pool[idx - 1] for idx in drop}
+    kept = [item for item in items if item not in dropped]
+    print(f"  dedup: {len(drop)} duplicado(s) descartado(s):")
+    for idx in sorted(drop):
+        print(f"    → {pool[idx - 1].source} — {pool[idx - 1].title[:70]}")
+    return kept

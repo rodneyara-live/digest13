@@ -24,10 +24,11 @@ flowchart TD
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
             C --> D["🤖 Groq API (openai/gpt-oss-120b)<br/>Curación con razonamiento"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
-            D1 --> D2["② Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
-            D2 --> D3["③ Descarga artículo completo<br/>(requests + trafilatura)"]:::process
-            D3 --> D4["④ Generación de párrafo<br/>(HECHO + CONTEXTO + IMPLICACIÓN)"]:::process
-            D4 --> D5["⑤ Revisión editorial<br/>(APROBADO / correcciones)"]:::process
+            D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
+            D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
+            D2 --> D3["④ Descarga artículo completo<br/>(requests + trafilatura)"]:::process
+            D3 --> D4["⑤ Generación de párrafo<br/>(HECHO + CONTEXTO + IMPLICACIÓN)"]:::process
+            D4 --> D5["⑥ Revisión editorial<br/>(modelo de razonamiento separado)"]:::process
             B --> E["🗣️ edge-tts Engine<br/>(Sintetiza MP3)"]:::api
             B --> F["🎨 HTML Generator<br/>(Ensambla Plantilla)"]:::api
 
@@ -105,6 +106,7 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
 LLM_MODEL="openai/gpt-oss-120b"
+EDITORIAL_MODEL="openai/gpt-oss-120b"
 
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
@@ -152,7 +154,7 @@ Esto evita que el TTS lea en voz alta símbolos de formato.
 
 ## 🎯 Pipeline de Curación (LLM + Cuotas)
 
-El modelo `openai/gpt-oss-120b` es un modelo *reasoning*: gasta tokens en cadena de pensamiento antes de responder. Por eso cada etapa usa `max_tokens` generosos (300/600/1500) o devuelve cadenas vacías. `call_llm` reintenta en 429 (límite de rate) con backoff de 30-60s.
+El pipeline usa dos modelos: `llama-3.3-70b-versatile` para el volumen (etapas 1-5) y `openai/gpt-oss-120b` —modelo *reasoning*— para la revisión editorial (etapa 6). `call_llm` acepta `model` por llamada. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles.
 
 ### Etapa 1 — Filtro de relevancia (`relevance.py`)
 
@@ -173,9 +175,13 @@ MOTIVO: [razón breve]
 
 Criterios de rechazo (PUNTAJE = 1): deportes/fútbol, efemérides/aniversarios, noticias universitarias (SINDEU, fedes), comunicados de prensa corporativos, pifias diplomáticas/mapas errados, lanzamientos de gadgets de consumo, videojuegos a precio completo, **pseudociencia/medicina alternativa/homeopatía**, **contenido antivacunas**, **reportajes sobre doulas/partos no asistidos como alternativa a la atención médica profesional**.
 
-### Etapa 2 — Selección por cuotas (`main.py: select_by_quota`)
+### Etapa 2 — Deduplicación por evento (`relevance.py: deduplicate_by_event`)
 
-Tras el filtro, se seleccionan items por puntaje respetando cuotas por sección:
+Una sola llamada LLM recibe los top-20 candidatos (ID, sección, fuente, título, fragmento de resumen) y responde `GRUPO: [IDs]` por cada grupo de items que cubren el **mismo evento**. Se conserva el de mayor puntaje de cada grupo. Esto resuelve el caso de varias fuentes RSS cubriendo la misma noticia de última hora con redacción distinta (p. ej. la crisis de Ceuta en BBC + Guardian). Un filtro determinista por similitud de keywords (umbral 0.65) en la selección complementa para duplicados casi idénticos.
+
+### Etapa 3 — Selección por cuotas (`main.py: select_by_quota`)
+
+Tras la dedup, se seleccionan items por puntaje respetando cuotas por sección:
 
 | Sección | Cuota |
 |---------|-------|
@@ -186,11 +192,11 @@ Tras el filtro, se seleccionan items por puntaje respetando cuotas por sección:
 
 Pase 1: se fuerza el mínimo de Costa Rica. Pase 2: se llenan los cupos restantes por puntaje global, respetando los máximos por sección.
 
-### Etapa 3 — Descarga de artículo completo (`article_fetcher.py`)
+### Etapa 4 — Descarga de artículo completo (`article_fetcher.py`)
 
 Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br`, descompresión manual (Semanario Universidad devuelve gzip que trafilatura no descomprime). El HTML se decodifica y se extrae texto con `trafilatura`. Umbral mínimo de 100 caracteres.
 
-### Etapa 4 — Generación de párrafo (`paragraph_gen.py`)
+### Etapa 5 — Generación de párrafo (`paragraph_gen.py`)
 
 ```text
 ### [Título descriptivo y directo]
@@ -200,9 +206,9 @@ Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br
 
 Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=600`, temperatura 0.4.
 
-### Etapa 5 — Revisión editorial (`editorial_review.py`)
+### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
-El informe completo (máx 8000 caracteres) se envía a una segunda pasada que verifica estructura (`### [Título]` + párrafo + `*(Fuente: ...)*`), ausencia de frases vagas y uso de datos concretos. Responde `APROBADO` o una lista de correcciones. `max_tokens=1500`, temperatura 0.2.
+El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) para una segunda pasada que verifica: estructura (`### [Título]` + párrafo + `*(Fuente: ...)*`), ausencia de frases vagas, uso de datos concretos y **detección de dos noticias que cubren el mismo evento**. Responde `APROBADO` o una lista de correcciones específicas. `max_tokens=1500`, temperatura 0.2.
 
 ---
 
