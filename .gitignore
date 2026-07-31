@@ -4,3 +4,4 @@ venv/
 __pycache__/
 *.mp3
 *.html
+debug_news.txt

@@ -17,7 +17,7 @@ Prohibido: "es importante", "genera debate", "situación delicada", "es un logro
 def generate_paragraph(item: Item, full_text: str) -> str | None:
     truncated = full_text[:2500]
     user = USER_PROMPT.format(full_text=truncated, source=item.source)
-    text = call_llm(SYSTEM_PROMPT, user, max_tokens=400, temperature=0.4)
+    text = call_llm(SYSTEM_PROMPT, user, max_tokens=600, temperature=0.4)
     if text:
         return text
     return None

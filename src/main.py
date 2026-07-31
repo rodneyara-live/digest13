@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from config import PROJECT_ROOT
@@ -12,7 +13,6 @@ from text_cleaner import strip_markdown
 from tts_engine import synthesize
 from email_sender import send
 
-
 DATE_STAMP = date.today().strftime("%Y.%m.%d")
 MP3_FILENAME = f"digest13.{DATE_STAMP}.mp3"
 HTML_FILENAME = f"digest13.{DATE_STAMP}.html"
@@ -23,8 +23,13 @@ SECTION_ORDER = [
     "TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE",
 ]
 
-TOKEN_LIMIT = 90_000
-_approx_tokens = 0
+SECTION_QUOTAS: dict[str, dict] = {
+    "GEOPOLÍTICA Y AMÉRICA LATINA": {"max": 6},
+    "POLÍTICA Y SOCIEDAD COSTARRICENSE": {"min": 3, "max": 5},
+    "TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE": {"max": 5},
+}
+MAX_TOTAL = 15
+TOKEN_LIMIT = 60_000
 
 
 def _section_rank(section: str) -> int:
@@ -34,10 +39,48 @@ def _section_rank(section: str) -> int:
         return 99
 
 
-def assemble(items: list[tuple[str, str]]) -> str:
+def select_by_quota(items: list) -> list:
+    by_section: dict[str, list] = defaultdict(list)
+    for item in items:
+        by_section[item.section].append(item)
+
+    for sec in by_section:
+        by_section[sec].sort(key=lambda i: (-i.score, i.title))
+
+    selected: list = []
+    counts: dict[str, int] = defaultdict(int)
+
+    # Pass 1: force minimum for Costa Rica
+    cr_key = "POLÍTICA Y SOCIEDAD COSTARRICENSE"
+    cr_min = SECTION_QUOTAS.get(cr_key, {}).get("min", 0)
+    cr_items = by_section.get(cr_key, [])
+    for item in cr_items[:cr_min]:
+        selected.append(item)
+        counts[cr_key] += 1
+
+    # Pass 2: global ranking by score, respecting caps
+    remaining = sorted(
+        [i for i in items if i not in selected],
+        key=lambda i: (-i.score, i.title),
+    )
+    for item in remaining:
+        if len(selected) >= MAX_TOTAL:
+            break
+        sec = item.section
+        sec_max = SECTION_QUOTAS.get(sec, {}).get("max", 999)
+        if counts[sec] >= sec_max:
+            continue
+        selected.append(item)
+        counts[sec] += 1
+
+    selected.sort(key=lambda i: (_section_rank(i.section), -i.score, i.title))
+    return selected
+
+
+def assemble(items: list) -> str:
     sections: dict[str, list[str]] = {}
-    for section, md in items:
-        sections.setdefault(section, []).append(md)
+    for item in items:
+        sections.setdefault(item.section, []).append(item.paragraph_md)
 
     parts = []
     for section in SECTION_ORDER:
@@ -50,8 +93,6 @@ def assemble(items: list[tuple[str, str]]) -> str:
 
 
 def main() -> None:
-    global _approx_tokens
-
     print("Leyendo feeds RSS...")
     items = fetch_items()
     print(f"  {len(items)} items obtenidos")
@@ -64,13 +105,19 @@ def main() -> None:
         print("ERROR: Ningún item superó el filtro de relevancia")
         return
 
-    approved.sort(key=lambda i: (_section_rank(i.section), i.title))
+    print(f"Seleccionando por puntaje y cuotas...")
+    selected = select_by_quota(approved)
+    print(f"  {len(selected)} items seleccionados:")
+    for it in selected:
+        print(f"    [{it.score}] {it.section[:30]:30s} {it.title[:80]}")
+
+    approx_tokens = 0
 
     print("Descargando artículos completos y generando párrafos...")
-    paragraphs: list[tuple[str, str]] = []
-    total = len(approved)
-    for i, item in enumerate(approved, 1):
-        if _approx_tokens >= TOKEN_LIMIT:
+    paragraphs: list = []
+    total = len(selected)
+    for i, item in enumerate(selected, 1):
+        if approx_tokens >= TOKEN_LIMIT:
             print(f"  [budget agotado] procesados {i-1}/{total}, restantes saltados")
             break
 
@@ -85,20 +132,21 @@ def main() -> None:
             print(f"    → no se pudo generar párrafo")
             continue
 
-        # rough token estimate: 1 token ≈ 4 chars (Spanish)
-        _approx_tokens += (len(full_text[:2500]) + len(paragraph)) // 4
-        paragraphs.append((item.section, paragraph))
+        approx_tokens += (len(full_text[:2500]) + len(paragraph)) // 4
+        item.paragraph_md = paragraph
+        paragraphs.append(item)
 
-    news_text = assemble(paragraphs)
-    if not news_text:
+    if not paragraphs:
         print("ERROR: No se generaron noticias")
         return
+
+    news_text = assemble(paragraphs)
 
     (PROJECT_ROOT / "debug_news.txt").write_text(news_text, encoding="utf-8")
 
     print("Revisión editorial...")
-    _approx_tokens += len(news_text) // 4
-    if _approx_tokens < TOKEN_LIMIT:
+    approx_tokens += len(news_text) // 4
+    if approx_tokens < TOKEN_LIMIT:
         review_result = review(news_text)
         if review_result:
             print(f"  Pendiente de corrección: {review_result[:200]}")

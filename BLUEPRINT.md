@@ -22,11 +22,16 @@ flowchart TD
 
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
-            C --> D["🤖 Groq API (LLaMA 3.3 70B)<br/>(Texto Curado LLM)"]:::api
+            C --> D["🤖 Groq API (openai/gpt-oss-120b)<br/>Curación con razonamiento"]:::api
+            D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
+            D1 --> D2["② Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
+            D2 --> D3["③ Descarga artículo completo<br/>(requests + trafilatura)"]:::process
+            D3 --> D4["④ Generación de párrafo<br/>(HECHO + CONTEXTO + IMPLICACIÓN)"]:::process
+            D4 --> D5["⑤ Revisión editorial<br/>(APROBADO / correcciones)"]:::process
             B --> E["🗣️ edge-tts Engine<br/>(Sintetiza MP3)"]:::api
             B --> F["🎨 HTML Generator<br/>(Ensambla Plantilla)"]:::api
 
-            D --> G["📦 MIME Package Builder<br/>(HTML + Audio Incrustado)"]:::process
+            D5 --> G["📦 MIME Package Builder<br/>(HTML + Audio Incrustado)"]:::process
             E --> G
             F --> G
         end
@@ -50,9 +55,11 @@ flowchart TD
 * `python-dotenv` (Manejo de variables de entorno).
 * `markdown` (Conversión Markdown → HTML).
 * `feedparser` (Consumo de fuentes RSS).
+* `requests` + `brotli` (Descarga de artículos con descompresión gzip/br).
+* `trafilatura` (Extracción de texto limpio de artículos).
 
 * **Servicios Externos:**
-* API Key de Groq (Gratuito / Sin prepago necesario).
+* API Key de Groq (Gratuito / Sin prepago necesario). Modelo `openai/gpt-oss-120b` con **200K tokens/día**; un run diario consume ~60-70K.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -66,14 +73,12 @@ Para garantizar que el proyecto no contamine el sistema de archivos global (`~/.
    ```python
    import os
    from pathlib import Path
+
+   PROJECT_ROOT = Path(__file__).parent.resolve()
+   os.environ["HF_HOME"] = str(PROJECT_ROOT / ".cache" / "huggingface")
+   os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / ".cache")
+   os.environ["TORCH_HOME"] = str(PROJECT_ROOT / ".cache" / "torch")
    ```
-
-PROJECT_ROOT = Path(__file__).parent.resolve()
-os.environ["HF_HOME"] = str(PROJECT_ROOT / ".cache" / "huggingface")
-os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / ".cache")
-os.environ["TORCH_HOME"] = str(PROJECT_ROOT / ".cache" / "torch")
-
-```
 2. **Aceleración por GPU (NVIDIA Quadro T2000 / Turing 4GB VRAM):** En caso de integrar módulos locales opcionales de procesamiento futuro (vía PyTorch u ONNX), el código debe detectar la GPU mediante CUDA (`device = 'cuda'`) utilizando precisión `float16` o cuantización de 4 bits (`INT4`) para operar dentro del límite de memoria de la tarjeta.
 3. **Limpieza en Git:** El archivo `.gitignore` debe excluir todo archivo o caché local generado.
 
@@ -99,7 +104,7 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 ```ini
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
-LLM_MODEL="llama-3.3-70b-versatile"
+LLM_MODEL="openai/gpt-oss-120b"
 
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
@@ -125,7 +130,7 @@ El pipeline recolecta titulares y sumarios de las siguientes fuentes RSS antes d
 |---------|-------------|
 | Geopolítica y América Latina | The Guardian (world + americas), BBC News, Al Jazeera |
 | Política y Sociedad Costarricense | Delfino.cr, Semanario Universidad |
-| Tecnología y Cultura Digital | The Guardian (technology), Ars Technica |
+| Tecnología, Infraestructura y Software | The Guardian (technology), Ars Technica |
 
 Cada entrada incluye su fuente (`[The Guardian]`), y el prompt exige citar `(Fuente: ...)` al final de cada noticia. El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
 
@@ -145,61 +150,59 @@ Esto evita que el TTS lea en voz alta símbolos de formato.
 
 ---
 
-## 🎯 Prompt de Calibración Integrado
+## 🎯 Pipeline de Curación (LLM + Cuotas)
 
-El backend en Python debe enviar el siguiente prompt exacto al modelo de lenguaje para garantizar la maquetación en bloques independientes, evitando párrafos masivos o respuestas continuas:
+El modelo `openai/gpt-oss-120b` es un modelo *reasoning*: gasta tokens en cadena de pensamiento antes de responder. Por eso cada etapa usa `max_tokens` generosos (300/600/1500) o devuelve cadenas vacías. `call_llm` reintenta en 429 (límite de rate) con backoff de 30-60s.
+
+### Etapa 1 — Filtro de relevancia (`relevance.py`)
+
+Cada item RSS se evalúa con puntaje **1 a 5** y se reasigna a una sección. Respuesta en formato estricto:
 
 ```text
-ROL Y PERSONALIDAD DEL AGENTE: Eres el Editor Senior y Analista de Inteligencia de un boletín privado de alto nivel ("Digest 13"). Tu personalidad es sobria, analítica, pragmática y tica en su contexto, con un ojo agudo para la ingeniería, la tecnología profunda, el software libre, la soberanía digital, la fotografía física y la macroeconomía. Desprecias la prensa amarillista, las efemérides baratas, los comunicados de prensa corporativos, el circo mediático/vulgaridades de la política, la "tecnología de vitrina" de consumo y el "moralismo pedagógico" en las noticias. Tu trabajo no es resumir el internet, sino separar el grano de la paja para un lector técnico y pragmático.
-
-REGLAS ESTRUCTURALES Y DE FORMATO:
-- CERO MORALISMO: Prohibido terminar notas con "Esto demuestra la importancia de...", "Subraya la necesidad de...", "Refleja los desafíos de..." o "Nos invita a reflexionar...". Entrega HECHO + CONTEXTO + IMPLICACIÓN real. Nada más.
-- Cada sección DEBE tener notas 100% INDEPENDIENTES. Prohibido conectar con "Por otro lado", "En paralelo" o "En materia de...".
-- CADA NOTICIA DEBE TENER EXACTAMENTE ESTA ESTRUCTURA:
-  ### [Título descriptivo, técnico y directo]
-
-  [Párrafo de 3 a 5 oraciones con TRES COMPONENTES OBLIGATORIOS:
-   1. HECHO CONCRETO: Qué ocurrió, quién, cuándo, cifras. No basta "X respondió a Y" sin especificar proyecto/ley/cifra concreta.
-   2. CONTEXTO: Antecedentes que expliquen por qué es relevante. Si no hay contexto real, no hay noticia.
-   3. IMPLICACIÓN: Impacto operativo, económico o sistémico concreto.]
-  *(Fuente: [Nombre del medio])*
-- SI LOS RSS NO CONTIENEN DATOS REALES sobre un tema, NO INVENTAR. Es preferible una sección más corta con noticias reales que una larga con contenido genérico o alucinado.
-
-CRITERIOS EDITORIALES POR SECCIÓN:
-
-1. GEOPOLÍTICA Y AMÉRICA LATINA (Fuentes: The Guardian, BBC, Al Jazeera)
-   BAJO NINGUNA CIRCUNSTANCIA INCLUIR:
-   - Pifias diplomáticas, mapas errados, declaraciones sin efecto legal/militar (ej. "presidente se equivocó en un mapa")
-   - Curiosidades, color local o notas insustanciales sin impacto sistémico
-   COBERTURA:
-   - Hasta 6 acontecimientos de alto impacto (conflictos, macroeconomía, relaciones bilaterales, crisis de gobernanza, control de recursos)
-   - Mínimo 2 de América Latina o Sur Global
-
-2. POLÍTICA Y SOCIEDAD COSTARRICENSE (Fuentes: Delfino.cr, Semanario Universidad)
-   BAJO NINGUNA CIRCUNSTANCIA INCLUIR:
-   - Efemérides, aniversarios, actos protocolarios, inauguraciones locales
-   - Noticias sindicales universitarias (SINDEU, fedes universitarias)
-   - Ataques personales, insultos, shows mediáticos, disputas de micrófono entre políticos
-   - Comunicados de prensa corporativos o boletines institucionales
-   COBERTURA:
-   - Hasta 6 temas de fondo: fiscalización del poder público, proyectos de ley en debate, resoluciones judiciales/constitucionales, indicadores macro (deuda, tipo de cambio, inflación, impuestos), tensiones en infraestructura/seguridad
-   - Incluir 1-2 noticias de Semanario Universidad
-   - Si una polémica contiene un proyecto/impacto real (ej. reforma IVA, choque OIJ-Seguridad), extraer SOLO el proyecto, la ley o el dato económico — ignorar declaraciones y chabacanería
-
-3. TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE (Fuentes: The Guardian Technology, Ars Technica)
-   BAJO NINGUNA CIRCUNSTANCIA INCLUIR:
-   - Lanzamientos de teléfonos, pantallas, audífonos o gadgets de consumo
-   - Parches menores de versión ni reseñas de productos
-   - Noticias de videojuegos a precio completo, trailers o rumores
-   COBERTURA (entre 2 y 4 temas, SOLO si hay noticias reales en los RSS):
-   - Infraestructura e IA: costos de API/tokens, modelos abiertos vs cerrados, soberanía digital
-   - Hardware: crisis de silicio, precios de componentes, fallos de arquitectura de procesadores
-   - Ciberseguridad: brechas críticas, regulaciones, vulnerabilidades de infraestructura
-   - Fotografía técnica/óptica: SOLO si hay una noticia real con datos concretos (sensores, C2PA, óptica física), NO inventar
-   - Gaming: SOLO si un juego AAA o Indie aclamado está 100% gratis para reclamar (Epic/GOG/Steam) o tiene 75%+ descuento. Si no, IGNORAR
-
-TONO: Imparcial, denso en datos, técnico, directo y de nivel profesional.
+PUNTAJE: [1-5]
+ACCIÓN: [APROBAR|RECHAZAR]
+SECCIÓN: [GEOPOLÍTICA Y AMÉRICA LATINA|POLÍTICA Y SOCIEDAD COSTARRICENSE|TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE]
+MOTIVO: [razón breve]
 ```
+
+- **5** = IMPERDIBLE (impacto global directo, crisis mayor, cambio de políticas)
+- **4** = ALTA RELEVANCIA (afecta significativamente a la región o sector)
+- **3** = RELEVANCIA MEDIA (informativo, contexto útil)
+- **2** = BAJA RELEVANCIA (tangencial, rumor, especulación)
+- **1** = RECHAZAR
+
+Criterios de rechazo (PUNTAJE = 1): deportes/fútbol, efemérides/aniversarios, noticias universitarias (SINDEU, fedes), comunicados de prensa corporativos, pifias diplomáticas/mapas errados, lanzamientos de gadgets de consumo, videojuegos a precio completo, **pseudociencia/medicina alternativa/homeopatía**, **contenido antivacunas**, **reportajes sobre doulas/partos no asistidos como alternativa a la atención médica profesional**.
+
+### Etapa 2 — Selección por cuotas (`main.py: select_by_quota`)
+
+Tras el filtro, se seleccionan items por puntaje respetando cuotas por sección:
+
+| Sección | Cuota |
+|---------|-------|
+| GEOPOLÍTICA Y AMÉRICA LATINA | máx 6 |
+| POLÍTICA Y SOCIEDAD COSTARRICENSE | mín 3, máx 5 |
+| TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE | máx 5 |
+| **Total** | **máx 15 items** (~10-12 min de audio) |
+
+Pase 1: se fuerza el mínimo de Costa Rica. Pase 2: se llenan los cupos restantes por puntaje global, respetando los máximos por sección.
+
+### Etapa 3 — Descarga de artículo completo (`article_fetcher.py`)
+
+Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br`, descompresión manual (Semanario Universidad devuelve gzip que trafilatura no descomprime). El HTML se decodifica y se extrae texto con `trafilatura`. Umbral mínimo de 100 caracteres.
+
+### Etapa 4 — Generación de párrafo (`paragraph_gen.py`)
+
+```text
+### [Título descriptivo y directo]
+[Párrafo de 3 a 5 oraciones: HECHO con cifras/nombres/fechas, CONTEXTO, IMPLICACIÓN.]
+*(Fuente: {source})*
+```
+
+Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=600`, temperatura 0.4.
+
+### Etapa 5 — Revisión editorial (`editorial_review.py`)
+
+El informe completo (máx 8000 caracteres) se envía a una segunda pasada que verifica estructura (`### [Título]` + párrafo + `*(Fuente: ...)*`), ausencia de frases vagas y uso de datos concretos. Responde `APROBADO` o una lista de correcciones. `max_tokens=1500`, temperatura 0.2.
 
 ---
 
@@ -322,6 +325,7 @@ La directiva `Persistent=true` asegura que si la máquina estaba apagada a las 7
    __pycache__/
    *.mp3
    *.html
+   debug_news.txt
    ```
 
 ```

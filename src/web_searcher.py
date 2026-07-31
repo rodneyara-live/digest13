@@ -9,6 +9,8 @@ class Item:
     source: str
     url: str
     summary: str
+    score: int = 0
+    paragraph_md: str = ""
 
 
 SOURCE_MAP: dict[str, str] = {

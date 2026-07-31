@@ -18,7 +18,7 @@ def review(news_text: str) -> str | None:
     if not news_text.strip():
         return "INFORME VACÍO"
 
-    answer = call_llm(SYSTEM_PROMPT, USER_PROMPT.format(news_text=news_text[:8000]), max_tokens=200)
+    answer = call_llm(SYSTEM_PROMPT, USER_PROMPT.format(news_text=news_text[:8000]), max_tokens=1500, temperature=0.2)
     if not answer:
         return "ERROR: sin respuesta de revisión"
     if answer.upper().startswith("APROBADO"):

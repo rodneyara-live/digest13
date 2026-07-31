@@ -11,8 +11,7 @@ os.environ.setdefault("TORCH_HOME", str(PROJECT_ROOT / ".cache" / "torch"))
 load_dotenv(PROJECT_ROOT / ".env")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-LLM_MODEL = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
+LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
 TTS_VOICE = os.environ.get("TTS_VOICE", "es-CR-MariaNeural")
 SMTP_SERVER = os.environ["SMTP_SERVER"]
 SMTP_PORT = int(os.environ["SMTP_PORT"])

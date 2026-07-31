@@ -6,3 +6,5 @@ feedparser
 httpx
 beautifulsoup4
 trafilatura
+requests
+brotli
