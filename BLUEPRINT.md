@@ -274,26 +274,29 @@ El script debe encapsular el texto generado e incrustar el audio en la siguiente
 
 ## ⚙️ Automatización en Linux mediante `systemd`
 
-Para ejecutar Digest 13 diariamente a primera hora sin importar si la computadora estuvo apagada, crea los siguientes dos archivos en `~/.config/systemd/user/`:
+Para ejecutar Digest 13 diariamente a primera hora sin importar si la computadora estuvo apagada, crea los siguientes archivos en `~/.config/systemd/user/`.
 
-### 1. `digest13.service`
+### 1. `digest13.service` — servicio principal
 
 ```ini
 [Unit]
 Description=Servicio Digest 13 - Generacion de Noticias y TTS Diario
 After=network-online.target
 Wants=network-online.target
+OnFailure=digest13-notify.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/ruta/a/tu/proyecto/digest-13
-ExecStart=/ruta/a/tu/proyecto/digest-13/venv/bin/python src/main.py
+WorkingDirectory=/ruta/a/tu/proyecto/digest13
+ExecStart=/ruta/a/tu/proyecto/digest13/venv/bin/python src/main.py
 
 [Install]
 WantedBy=default.target
 ```
 
-### 2. `digest13.timer`
+La directiva `OnFailure=` dispara `digest13-notify.service` si el pipeline falla (exit code != 0). El script `main.py` ya retorna `sys.exit(1)` en los puntos de fallo crítico (filtro de relevancia vacío, sin noticias generadas).
+
+### 2. `digest13.timer` — programador diario
 
 ```ini
 [Unit]
@@ -307,14 +310,94 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-### Habilitar el temporizador:
+La directiva `Persistent=true` asegura que si la máquina estaba apagada a las 7:00 AM, el script detectará el evento pendiente y se ejecutará automáticamente unos segundos después de que enciendas el sistema.
+
+### 3. `digest13-notify.service` — notificación de fallo
+
+```ini
+[Unit]
+Description=Notificación de fallo Digest 13
+
+[Service]
+Type=oneshot
+ExecStart=/ruta/a/tu/proyecto/digest13/on-failure.sh %n
+```
+
+Recibe el nombre del servicio que falló como argumento. El script `on-failure.sh` registra el fallo en `logs/failures.log`.
+
+### 4. `on-failure.sh` — script de registro de fallos
+
+Ubicado en la raíz del proyecto. Crea `logs/failures.log` (gitignored) con una línea por cada fallo:
+
+```
+[2026-07-31 07:00:15] Digest 13 falló (exit code: digest13.service)
+```
+
+También puede invocarse manualmente después de ejecutar `main.py`:
 
 ```bash
+./on-failure.sh $?
+```
+
+### Instalación
+
+```bash
+# Crear directorio de servicios
+mkdir -p ~/.config/systemd/user/digest13.service.d
+
+# Copiar archivos (ajustar WorkingDirectory y ExecStart)
+# ... crear digest13.service, digest13.timer, digest13-notify.service ...
+
+# Crear drop-in para OnFailure=
+cat > ~/.config/systemd/user/digest13.service.d/override.conf << EOF
+[Service]
+OnFailure=digest13-notify.service
+EOF
+
+# Recargar y habilitar
 systemctl --user daemon-reload
 systemctl --user enable --now digest13.timer
 ```
 
-La directiva `Persistent=true` asegura que si la máquina estaba apagada a las 7:00 AM, el script detectará el evento pendiente y se ejecutará automáticamente unos segundos después de que enciendas el sistema.
+### Verificación
+
+```bash
+# Ejecutar manualmente para probar
+systemctl --user start digest13.service
+
+# Verificar que el servicio corrió
+systemctl --user status digest13.service
+
+# Simular fallo (ejecutar sin GROQ_API_KEY)
+GROQ_API_KEY="" ~/.config/systemd/user/../../digest13/venv/bin/python src/main.py
+echo $?  # Debe mostrar 1
+
+# Verificar que el log de fallos se creó
+cat logs/failures.log
+```
+
+### Monitoreo
+
+```bash
+# Ver logs del pipeline (últimas 24 horas)
+journalctl --user -u digest13.service --since today
+
+# Ver solo errores
+journalctl --user -u digest13.service --since today -p err
+
+# Ver log de fallos del script
+cat logs/failures.log
+```
+
+### Alternativa: cron
+
+Si preferís cron sobre systemd, agrega esta línea con `crontab -e`:
+
+```cron
+0 7 * * * cd /ruta/a/tu/proyecto/digest13 && ./venv/bin/python src/main.py >> logs/cron.log 2>&1 || ./on-failure.sh cron >> logs/failures.log
+```
+
+Nota: cron no tiene `Persistent=true` — si la máquina estaba apagada a las 7:00 AM, el run se pierde hasta mañana.
 
 ---
 
@@ -323,15 +406,16 @@ La directiva `Persistent=true` asegura que si la máquina estaba apagada a las 7
 1. **Aislamiento de Credenciales:** La cuenta SMTP configurada para enviar los correos debe ser una cuenta secundaria (p. ej. Proton Mail con contraseña de aplicación o token aislado) sin privilegios sobre cuentas personales principales.
 2. **Exclusión de Git:** Asegurarse de que `.env`, la carpeta `venv/`, el directorio `.cache/` y cualquier archivo `.mp3` o `.html` temporal generado estén especificados dentro de `.gitignore`:
    
-   ```gitignore
-   venv/
-   .cache/
-   .env
-   __pycache__/
-   *.mp3
-   *.html
-   debug_news.txt
-   ```
+    ```gitignore
+    venv/
+    .cache/
+    .env
+    __pycache__/
+    *.mp3
+    *.html
+    debug_news.txt
+    logs/
+    ```
 
 ```
 

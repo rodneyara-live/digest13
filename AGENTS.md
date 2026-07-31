@@ -6,7 +6,7 @@
 
 - LLM backend: **Groq** (model: `openai/gpt-oss-120b`) — free tier, no prepay required
 - Env key: `GROQ_API_KEY`
-- Model is a *reasoning* model: it spends tokens on chain-of-thought before answering, so `max_tokens` must be generous (relevance=300, paragraph=600, editorial review=1500) or it returns empty strings
+- Model is a *reasoning* model: it spends tokens on chain-of-thought before answering, so `max_tokens` must be generous (relevance=600, paragraph=800, editorial review=1500) or it returns empty strings
 - Groq free tier: **100K tokens/day** for `llama-3.3-70b-versatile` (pipeline volume), **200K tokens/day** for `openai/gpt-oss-120b` (editorial review). One daily run uses ~60-70K. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion fails fast (no futile retries)
 
 ## Architecture (from BLUEPRINT.md)
@@ -16,6 +16,9 @@
 - Editorial review uses a separate reasoning model (`EDITORIAL_MODEL`, default `openai/gpt-oss-120b`) — gives it a distinct daily quota
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
+- Failure alerting: `OnFailure=digest13-notify.service` triggers `on-failure.sh` which logs to `logs/failures.log`
+- `main.py` exits with `sys.exit(1)` on critical failures (empty filter, no paragraphs generated)
+- Error logging: `article_fetcher.py` and `web_searcher.py` log exception type and message on failures
 - Local cache isolation: redirect all cache/temp dirs under `.cache/` (set `HF_HOME`, `XDG_CACHE_HOME`, `TORCH_HOME` at module init)
 - GPU path (future): detect `cuda`, use `float16` or INT4 quantization for 4GB VRAM (NVIDIA Quadro T2000)
 
@@ -57,6 +60,7 @@ __pycache__/
 *.mp3
 *.html
 debug_news.txt
+logs/
 ```
 
 ## Key style constraints

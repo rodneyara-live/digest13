@@ -79,7 +79,8 @@ def fetch_items() -> list[Item]:
                     count += 1
                     if count >= MAX_PER_FEED:
                         break
-            except Exception:
+            except Exception as e:
+                print(f"  ERROR [{type(e).__name__}]: {e} — {url[:60]}")
                 continue
 
     return items

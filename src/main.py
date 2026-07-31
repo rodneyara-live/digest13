@@ -1,5 +1,6 @@
 import asyncio
 import re
+import sys
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -143,7 +144,7 @@ def main() -> None:
 
     if not approved:
         print("ERROR: Ningún item superó el filtro de relevancia")
-        return
+        sys.exit(1)
 
     print("Deduplicando por evento...")
     approved = deduplicate_by_event(approved)
@@ -182,7 +183,7 @@ def main() -> None:
 
     if not paragraphs:
         print("ERROR: No se generaron noticias")
-        return
+        sys.exit(1)
 
     news_text = assemble(paragraphs)
 

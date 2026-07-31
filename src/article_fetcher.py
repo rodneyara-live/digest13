@@ -38,5 +38,6 @@ def fetch_full_text(url: str) -> str | None:
         if text and len(text.strip()) > 100:
             return text.strip()
         return None
-    except Exception:
+    except Exception as e:
+        print(f"  ERROR [{type(e).__name__}]: {e} — {url[:60]}")
         return None

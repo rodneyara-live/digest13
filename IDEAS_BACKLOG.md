@@ -14,46 +14,7 @@ suene a "ahorrar tokens" debe pesarse contra esto: aquí se prefiere gastar de m
 
 ## Items abiertos
 
-### Prioridad 1 — Observabilidad: log de errores estructurado
-
-Hoy los `except Exception` en [article_fetcher.py:43](src/article_fetcher.py:43) y
-[web_searcher.py:82](src/web_searcher.py:82) tragan la excepción sin registrar tipo/mensaje. Mientras
-se corre manualmente esto se tolera (se ve en la terminal), pero en cuanto el pipeline corra desatendido
-vía systemd/cron, todo ese detalle se pierde.
-
-**Acción, antes de programar el timer:**
-- Loguear `type(e).__name__` y `str(e)` en cada catch, no solo `return None`/`continue`.
-- Decidir destino del log: archivo rotado en el proyecto (p. ej. `logs/digest13.log`, gitignored) o
-  dejar que systemd capture stdout/stderr en el journal (`journalctl --user -u digest13.service`) — con
-  journal alcanza si no se necesita retención larga.
-- Si se usa journal, no hace falta un logger dedicado: los `print()` actuales ya van a stdout/stderr, que
-  systemd captura automáticamente.
-
-### Prioridad 2 — Confiabilidad: alerta si el run falla o queda vacío
-
-El script corre a las 7am sin supervisión. Si `filter_items()` rechaza todo (`main.py:104-106`) o si
-`email_sender.send()` lanza una excepción (SMTP caído, credenciales vencidas), el único síntoma visible
-es "no llegó el correo hoy" — que se puede notar horas o días después.
-
-**Acción:**
-- Opción simple: unidad `OnFailure=` en systemd que dispare un correo/notificación mínima cuando
-  `digest13.service` termine con código de error.
-- Opción alternativa sin más infraestructura: revisar `journalctl --user -u digest13.service --since today`
-  periódicamente, o agregar un chequeo manual rápido a la rutina matutina hasta tener confianza en el
-  pipeline.
-
-### Prioridad 3 — Calidad: deduplicación por título exacto puede dejar pasar duplicados temáticos
-
-`web_searcher.py:68-71` dedupea por título exacto (o primeros 80 caracteres del summary). Como Guardian,
-BBC y Al Jazeera cubren el mismo evento con titulares distintos, el mismo hecho puede colarse dos veces
-en Geopolítica bajo redacciones distintas — el filtro de relevancia no tiene contexto de que ya vio esa
-noticia.
-
-**Acción (solo si se nota en la práctica):** dedup difuso por similitud de título/resumen antes de mandar
-los items al filtro de relevancia, o pedirle al LLM de relevancia que marque duplicados temáticos si ve
-el resto de titulares del batch.
-
-### Prioridad 4 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
+### Prioridad 1 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
 
 Groq da 200K tokens/día gratis para `openai/gpt-oss-120b`, pero en fases de prueba intensiva ese
 presupuesto se agota rápido y el pipeline queda sin poder correr ese día. `call_llm()` en
@@ -66,7 +27,7 @@ el cambio queda contenido en `llm.py`: detectar agotamiento del proveedor primar
 reintentos) y caer a un segundo cliente con la misma firma, o decidir el proveedor por variable de
 entorno. No requiere tocar los módulos de prompts.
 
-### Prioridad 5 (la más baja) — Eficiencia: conteo real de tokens en vez de estimación
+### Prioridad 2 (la más baja) — Eficiencia: conteo real de tokens en vez de estimación
 
 `main.py:114-148` estima tokens con `len(texto) // 4` y **no cuenta los tokens de la etapa de
 relevancia** (un LLM call por cada item de RSS crudo, antes de que `approx_tokens` empiece a acumularse).
@@ -106,7 +67,7 @@ consumo, no para restringir nada.
 
 ### ~~Prioridad original 3 — Feature: hipervínculo al artículo original en el título H3~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `a7b6b0f` (2026-07-31)
 
 **Evidencia:**
 - `src/paragraph_gen.py` — prompt modificado: eliminada línea `*(Fuente: {source})*`. Nuevo post-procesamiento con regex inyecta la URL real del `Item` en el título: `### [título](url)`.
@@ -118,18 +79,46 @@ consumo, no para restringir nada.
 
 ### ~~Prioridad original 7 — Menor: timeout explícito en SMTP~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `a7b6b0f` (2026-07-31)
 
 **Evidencia:**
 - `src/email_sender.py:26` — `smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30)`. Evita bloqueo indefinido si el servidor SMTP no responde.
 
 ### ~~Prioridad original 8 — Menor: reutilización de cliente Groq~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `a7b6b0f` (2026-07-31)
 
 **Evidencia:**
 - `src/llm.py:9-16` — cliente Groq instanciado una sola vez a nivel de módulo via `_get_client()` (lazy init). Antes se creaba uno nuevo en cada llamada (40-60 por run).
 
+### ~~Prioridad original 1 (nueva) — Observabilidad: log de errores estructurado~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/article_fetcher.py:41-42` — `except Exception as e: print(f"  ERROR [{type(e).__name__}]: {e} — {url[:60]}")`
+- `src/web_searcher.py:82-83` — `except Exception as e: print(f"  ERROR [{type(e).__name__}]: {e} — {url[:60]}")`
+- Los errores se imprimen a stderr y son capturados por el journal de systemd (`journalctl --user -u digest13.service`).
+
+### ~~Prioridad original 2 (nueva) — Confiabilidad: alerta si el run falla o queda vacío~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/main.py` — `sys.exit(1)` en los puntos de fallo crítico (filtro vacío, sin noticias generadas).
+- `on-failure.sh` — script que registra fallos en `logs/failures.log` (gitignored).
+- `BLUEPRINT.md` — documentación completa de configuración systemd con `OnFailure=digest13-notify.service`.
+- La implementación de systemd queda pendiente hasta que se configure el timer; el script funciona standalone con `./on-failure.sh $?`.
+
+### ~~Prioridad original 3 (nueva) — Calidad: deduplicación por título exacto puede dejar pasar duplicados temáticos~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/relevance.py:126-167` — `deduplicate_by_event()`: una llamada LLM agrupa los top-20 items por el mismo evento. Se conserva el de mayor puntaje de cada grupo.
+- `src/main.py:68-74` — `_is_duplicate()`: dedup determinista por similitud de keywords (umbral 0.65) durante `select_by_quota()`.
+- Estos dos mecanismos cubren el caso original del backlog (Guardian + BBC cubriendo el mismo evento con distinto titular). Falta verificación en producción para confirmar que no pasan duplicados.
+
 ---
 
-**Orden de aplicación (para items abiertos):** 1 (log de errores, antes de desatender) → 2 (alerta si falla) → 3 (dedup temático, si se nota en práctica) → 4 (respaldo LLM, si se agota cuota) → 5 (conteo real de tokens, solo diagnóstico).
+**Orden de aplicación (para items abiertos):** 1 (respaldo LLM, si se agota cuota) → 2 (conteo real de tokens, solo diagnóstico).
