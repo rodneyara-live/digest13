@@ -134,7 +134,7 @@ El pipeline recolecta titulares y sumarios de las siguientes fuentes RSS antes d
 | Política y Sociedad Costarricense | Delfino.cr, Semanario Universidad |
 | Tecnología, Infraestructura y Software | The Guardian (technology), Ars Technica |
 
-Cada entrada incluye su fuente (`[The Guardian]`), y el prompt exige citar `(Fuente: ...)` al final de cada noticia. El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
+Cada entrada incluye su fuente (`[The Guardian]`). El título de cada noticia se convierte en un hipervínculo al artículo original (`### [Título](url)`). El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
 
 ---
 
@@ -199,16 +199,15 @@ Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br
 ### Etapa 5 — Generación de párrafo (`paragraph_gen.py`)
 
 ```text
-### [Título descriptivo y directo]
+### [Título descriptivo y directo](url_del_artículo)
 [Párrafo de 3 a 5 oraciones: HECHO con cifras/nombres/fechas, CONTEXTO, IMPLICACIÓN.]
-*(Fuente: {source})*
 ```
 
-Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=600`, temperatura 0.4.
+El LLM genera solo título y párrafo. En Python, se inyecta la URL real del `Item` en el título (`### [título](url)`) — el modelo nunca escribe la URL. Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=800`, temperatura 0.4.
 
 ### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
-El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) para una segunda pasada que verifica: estructura (`### [Título]` + párrafo + `*(Fuente: ...)*`), ausencia de frases vagas, uso de datos concretos y **detección de dos noticias que cubren el mismo evento**. Responde `APROBADO` o una lista de correcciones específicas. `max_tokens=1500`, temperatura 0.2.
+El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) para una segunda pasada que verifica: estructura (`### [Título](url)` + párrafo), ausencia de frases vagas, uso de datos concretos y **detección de dos noticias que cubren el mismo evento**. Responde `APROBADO` o una lista de correcciones específicas. `max_tokens=1500`, temperatura 0.2.
 
 ---
 

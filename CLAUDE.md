@@ -46,8 +46,8 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
    Universidad's server returns gzip that `trafilatura`/`requests` won't auto-decompress, so there's
    manual decompression — don't remove it even if it looks redundant.
 5. **`paragraph_gen.generate_paragraph()`** — one LLM call per article, producing a `### Title` +
-   HECHO/CONTEXTO/IMPLICACIÓN paragraph + `*(Fuente: ...)*` footer. Input truncated to 2500 chars,
-   `max_tokens=600`. Banned phrases ("es importante", "genera debate", etc.) are enforced by the prompt.
+   HECHO/CONTEXTO/IMPLICACIÓN paragraph. Title is a hyperlink to the original article. Input truncated to 2500 chars,
+   `max_tokens=800`. Banned phrases ("es importante", "genera debate", etc.) are enforced by the prompt.
 6. **`editorial_review.review()`** — single LLM call over the entire assembled digest (max 8000 chars,
    `max_tokens=1500`) checking structure and banned-phrase compliance. Returns `None`/empty on APROBADO,
    otherwise a correction list that is currently only logged, not auto-applied.
@@ -88,7 +88,7 @@ Everything downstream of RSS fetch operates on the same mutable `Item` dataclass
 
 - LLM prompts in `relevance.py`, `paragraph_gen.py`, `editorial_review.py` must match BLUEPRINT.md
   verbatim — they are tuned/exact, not illustrative.
-- Every news item must end with `*(Fuente: {source})*`; sections are independent/self-contained blocks
+- Every news item title must be a hyperlink to the original article (`### [Título](url)`); sections are independent/self-contained blocks
   with no connective transitions between stories.
 - HTML output embeds audio as `cid:audio_resumen_mp3` (MIME attachment reference), never a file:// or
   http URL.

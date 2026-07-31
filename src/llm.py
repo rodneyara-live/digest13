@@ -6,6 +6,15 @@ from config import GROQ_API_KEY, LLM_MODEL
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 30.0
 
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = Groq(api_key=GROQ_API_KEY)
+    return _client
+
 
 def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
              temperature: float = 0.3, model: str | None = None) -> str | None:
@@ -13,7 +22,7 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
         print("  No GROQ_API_KEY configured")
         return None
 
-    client = Groq(api_key=GROQ_API_KEY)
+    client = _get_client()
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = client.chat.completions.create(

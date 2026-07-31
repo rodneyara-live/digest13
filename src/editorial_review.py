@@ -8,7 +8,7 @@ USER_PROMPT = """Revisa este informe:
 {news_text}
 
 Verifica cada noticia:
-1. ¿Tiene estructura ### [Título] + párrafo + *(Fuente: ...)*?
+1. ¿Tiene estructura ### [Título](url) + párrafo?
 2. ¿Evita frases vagas como "es importante", "genera debate", "situación delicada", "es un logro/paso importante"?
 3. ¿Usa datos concretos (cifras, nombres, fechas)?
 4. ¿Hay dos noticias que cubren el MISMO evento o la misma noticia de fondo? Si sí, indica el título exacto de la que conservar y de la que descartar.

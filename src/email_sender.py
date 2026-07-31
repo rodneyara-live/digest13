@@ -23,7 +23,7 @@ def send(html_content: str, audio_bytes: bytes, date_stamp: str) -> None:
     audio_part.add_header("Content-ID", "<audio_resumen_mp3>")
     msg.attach(audio_part)
 
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30) as server:
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
         server.send_message(msg)

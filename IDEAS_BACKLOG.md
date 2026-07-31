@@ -14,41 +14,7 @@ suene a "ahorrar tokens" debe pesarse contra esto: aquí se prefiere gastar de m
 
 ## Items abiertos
 
-### Prioridad 3 — Feature: hipervínculo al artículo original en el título H3, quitar atribución textual
-
-Hoy cada noticia cierra con `*(Fuente: {source})*` como texto plano (definido en el prompt de
-[paragraph_gen.py:11-12](src/paragraph_gen.py:11)). La idea: en vez de esa línea de atribución al final,
-convertir el título `### [Título]` en un hipervínculo directo al artículo original, para poder hacer clic
-y leer la nota completa en el medio de origen cuando un tema interese ampliar.
-
-El dato ya existe sin necesidad de extraer nada nuevo — `Item.url` ([web_searcher.py:10](src/web_searcher.py:10))
-se captura desde el RSS original y llega intacto hasta `generate_paragraph(item, full_text)` en
-[paragraph_gen.py:17](src/paragraph_gen.py:17).
-
-**Punto de diseño importante:** no conviene pedirle al LLM que escriba la URL él mismo dentro del texto
-generado — los modelos tienden a truncar, reformatear o inventar URLs largas. El enfoque correcto es:
-1. Dejar que el LLM siga generando solo el texto del título en la línea `###` (como ya hace).
-2. En Python, extraer ese texto de título de la respuesta (regex sobre la primera línea `### ...`) y
-   reconstruir la línea como `### [{título}]({item.url})`, inyectando la URL real del `Item`, no la que
-   "recuerde" el modelo.
-3. Quitar del prompt la instrucción de cerrar con `*(Fuente: {source})*`.
-
-`html_generator.py` no necesita cambios: `markdown.markdown(news_text, extensions=["extra"])` ya convierte
-`[texto](url)` dentro de un `###` en `<h3><a href="...">texto</a></h3>` sin configuración adicional. Si se
-quiere que el enlace abra en pestaña nueva (`target="_blank"`), sí habría que post-procesar el HTML
-generado, ya que python-markdown no agrega ese atributo por defecto.
-
-**Otros lugares que hay que actualizar en conjunto, no solo el prompt de párrafo:**
-- `BLUEPRINT.md` — el contrato de formato exacto (`### [Título]` + párrafo + `*(Fuente: ...)*`) debe
-  reflejar el nuevo formato sin la línea de fuente.
-- `editorial_review.py` — el prompt de revisión (línea 10) valida explícitamente que exista
-  `*(Fuente: ...)*`; ese chequeo debe cambiar a validar el hipervínculo en el título en su lugar.
-- `CLAUDE.md` — la sección "Key constraints" documenta `*(Fuente: {source})*` como invariante obligatorio;
-  actualizar una vez implementado.
-- `text_cleaner.strip_markdown()` ya convierte `[texto](url)` → `texto` (línea 9), así que el TTS seguiría
-  leyendo solo el título limpio, sin la URL — no requiere cambios.
-
-### Prioridad 4 — Observabilidad: log de errores estructurado
+### Prioridad 1 — Observabilidad: log de errores estructurado
 
 Hoy los `except Exception` en [article_fetcher.py:43](src/article_fetcher.py:43) y
 [web_searcher.py:82](src/web_searcher.py:82) tragan la excepción sin registrar tipo/mensaje. Mientras
@@ -63,7 +29,7 @@ vía systemd/cron, todo ese detalle se pierde.
 - Si se usa journal, no hace falta un logger dedicado: los `print()` actuales ya van a stdout/stderr, que
   systemd captura automáticamente.
 
-### Prioridad 5 — Confiabilidad: alerta si el run falla o queda vacío
+### Prioridad 2 — Confiabilidad: alerta si el run falla o queda vacío
 
 El script corre a las 7am sin supervisión. Si `filter_items()` rechaza todo (`main.py:104-106`) o si
 `email_sender.send()` lanza una excepción (SMTP caído, credenciales vencidas), el único síntoma visible
@@ -76,7 +42,7 @@ es "no llegó el correo hoy" — que se puede notar horas o días después.
   periódicamente, o agregar un chequeo manual rápido a la rutina matutina hasta tener confianza en el
   pipeline.
 
-### Prioridad 6 — Calidad: deduplicación por título exacto puede dejar pasar duplicados temáticos
+### Prioridad 3 — Calidad: deduplicación por título exacto puede dejar pasar duplicados temáticos
 
 `web_searcher.py:68-71` dedupea por título exacto (o primeros 80 caracteres del summary). Como Guardian,
 BBC y Al Jazeera cubren el mismo evento con titulares distintos, el mismo hecho puede colarse dos veces
@@ -87,19 +53,7 @@ noticia.
 los items al filtro de relevancia, o pedirle al LLM de relevancia que marque duplicados temáticos si ve
 el resto de titulares del batch.
 
-### Prioridad 7 — Menor: timeout explícito en SMTP
-
-`email_sender.py:26` abre `smtplib.SMTP(SMTP_SERVER, SMTP_PORT)` sin `timeout=`. Si el servidor SMTP
-queda colgado, el proceso completo (incluida la limpieza de temporales) se bloquea indefinidamente.
-Agregar `timeout=30` o similar cuando se vaya a dejar el pipeline corriendo sin supervisión.
-
-### Prioridad 8 — Menor: reutilización de cliente Groq
-
-`llm.py:16` instancia `Groq(api_key=...)` en cada llamada a `call_llm()`, y hay una llamada por item de
-RSS más una por artículo seleccionado — potencialmente 40-60 instanciaciones por run. No es un problema
-de correctitud, solo overhead evitable; se puede mover a un cliente módulo-level si se quiere pulir.
-
-### Prioridad 9 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
+### Prioridad 4 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
 
 Groq da 200K tokens/día gratis para `openai/gpt-oss-120b`, pero en fases de prueba intensiva ese
 presupuesto se agota rápido y el pipeline queda sin poder correr ese día. `call_llm()` en
@@ -112,7 +66,7 @@ el cambio queda contenido en `llm.py`: detectar agotamiento del proveedor primar
 reintentos) y caer a un segundo cliente con la misma firma, o decidir el proveedor por variable de
 entorno. No requiere tocar los módulos de prompts.
 
-### Prioridad 10 (la más baja) — Eficiencia: conteo real de tokens en vez de estimación
+### Prioridad 5 (la más baja) — Eficiencia: conteo real de tokens en vez de estimación
 
 `main.py:114-148` estima tokens con `len(texto) // 4` y **no cuenta los tokens de la etapa de
 relevancia** (un LLM call por cada item de RSS crudo, antes de que `approx_tokens` empiece a acumularse).
@@ -132,7 +86,7 @@ consumo, no para restringir nada.
 
 ## Items cerrados
 
-### ~~Prioridad 1 — `max_tokens` demasiado ajustados, riesgo de rechazo silencioso~~
+### ~~Prioridad original 1 — `max_tokens` demasiado ajustados, riesgo de rechazo silencioso~~
 
 **Cerrado en:** commit `0f0f805` (2026-07-31)
 
@@ -142,7 +96,7 @@ consumo, no para restringir nada.
 - `src/llm.py:28-30` — instrumentación de `response.choices[0].finish_reason`: si es `"length"`, se imprime `⚠ TRUNCADO: finish_reason=length (max_tokens=N)` en la terminal. Esto permite calibrar con datos reales en vez de suponer.
 - `editorial_review.py` — sin cambio, 1500 ya es suficiente.
 
-### ~~Prioridad 2 — Corrección: descompresión gzip/brotli en `article_fetcher.py`~~
+### ~~Prioridad original 2 — Corrección: descompresión gzip/brotli en `article_fetcher.py`~~
 
 **Cerrado en:** commit `0f0f805` (2026-07-31)
 
@@ -150,6 +104,32 @@ consumo, no para restringir nada.
 - `src/article_fetcher.py:35` — el bloque manual de gzip (`if content[:2] == b"\x1f\x8b": content = gzip.decompress(content)`) fue reemplazado por `content = _decompress(resp.content)`.
 - `_decompress()` (línea 16) ahora se invoca como path real, cubriendo gzip, zlib y brotli con fallback a `raw`. Semanario Universidad debería dejar de fallar con servidores que usen deflate/brotli.
 
+### ~~Prioridad original 3 — Feature: hipervínculo al artículo original en el título H3~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/paragraph_gen.py` — prompt modificado: eliminada línea `*(Fuente: {source})*`. Nuevo post-procesamiento con regex inyecta la URL real del `Item` en el título: `### [título](url)`.
+- `src/editorial_review.py:11` — validación cambiada de `### [Título] + párrafo + *(Fuente: ...)*` a `### [Título](url) + párrafo`.
+- `BLUEPRINT.md` — Etapa 5 y 6 actualizadas para reflejar el nuevo formato sin línea de fuente.
+- `AGENTS.md` — constraint actualizado: `Each news item title is a hyperlink to the original article`.
+- `CLAUDE.md` — constraints de formato y párrafo actualizados.
+- `text_cleaner.py` — sin cambios necesarios: ya convierte `[texto](url)` → `texto` para TTS.
+
+### ~~Prioridad original 7 — Menor: timeout explícito en SMTP~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/email_sender.py:26` — `smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30)`. Evita bloqueo indefinido si el servidor SMTP no responde.
+
+### ~~Prioridad original 8 — Menor: reutilización de cliente Groq~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/llm.py:9-16` — cliente Groq instanciado una sola vez a nivel de módulo via `_get_client()` (lazy init). Antes se creaba uno nuevo en cada llamada (40-60 por run).
+
 ---
 
-**Orden de aplicación (para items abiertos):** 3 (feature de UX que el usuario quiere pronto) → 4 y 5 (necesarios antes de dejarlo desatendido) → 6, 7, 8 (pulido opcional) → 9 (si se decide diversificar proveedor) → 10 (solo si se quiere instrumentación de consumo, no por ahorro).
+**Orden de aplicación (para items abiertos):** 1 (log de errores, antes de desatender) → 2 (alerta si falla) → 3 (dedup temático, si se nota en práctica) → 4 (respaldo LLM, si se agota cuota) → 5 (conteo real de tokens, solo diagnóstico).

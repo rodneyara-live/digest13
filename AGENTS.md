@@ -62,7 +62,7 @@ debug_news.txt
 ## Key style constraints
 
 - LLM prompts (see BLUEPRINT.md) are exact — must be sent verbatim. They live in `relevance.py`, `paragraph_gen.py`, and `editorial_review.py`
-- Each news item ends with its source attribution (`(Fuente: ...)`)
+- Each news item title is a hyperlink to the original article (`### [Título](url)`)
 - Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis
 - Temp files (MP3, HTML) deleted after successful email send
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)
