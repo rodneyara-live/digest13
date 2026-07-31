@@ -20,5 +20,5 @@ def generate_paragraph(item: Item, full_text: str) -> str | None:
     text = call_llm(SYSTEM_PROMPT, user, max_tokens=800, temperature=0.4)
     if not text:
         return None
-    text = re.sub(r"^###\s+(.+)$", f"### [\\1]({item.url})", text, count=1, flags=re.MULTILINE)
+    text = re.sub(r"^###\s*\[?(.+?)\]?\s*$", f"### [\\1]({item.url})", text, count=1, flags=re.MULTILINE)
     return text

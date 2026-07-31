@@ -16,8 +16,13 @@ suene a "ahorrar tokens" debe pesarse contra esto: aquí se prefiere gastar de m
 
 ### Prioridad 1 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
 
-Groq da 200K tokens/día gratis para `openai/gpt-oss-120b`, pero en fases de prueba intensiva ese
-presupuesto se agota rápido y el pipeline queda sin poder correr ese día. `call_llm()` en
+**Nota:** esto es distinto del split de dos modelos de Groq (`llama-3.3-70b-versatile` +
+`openai/gpt-oss-120b`) ya implementado — ese reparte la carga entre dos cuotas *dentro* de Groq. Este
+ítem es para cuando **ambas** cuotas de Groq se agoten el mismo día y se necesite un proveedor externo
+distinto (p. ej. Gemini) como respaldo total.
+
+Groq da 100K-200K tokens/día gratis por modelo, pero en fases de prueba intensiva ambos presupuestos se
+pueden agotar el mismo día y el pipeline queda sin poder correr. `call_llm()` en
 [llm.py](src/llm.py:10) ya es una capa angosta con firma fija
 (`call_llm(system_prompt, user_prompt, max_tokens, temperature) -> str | None`) — ni `relevance.py`,
 ni `paragraph_gen.py`, ni `editorial_review.py` conocen el proveedor detrás, solo llaman a esa función.
@@ -67,7 +72,9 @@ consumo, no para restringir nada.
 
 ### ~~Prioridad original 3 — Feature: hipervínculo al artículo original en el título H3~~
 
-**Cerrado en:** commit `a7b6b0f` (2026-07-31)
+**Cerrado en:** commit `a7b6b0f` (2026-07-31); **regresión encontrada y corregida en revisión posterior** (sin
+correr el pipeline — se verificó localmente con `markdown.markdown()` sobre casos simulados, sin gastar
+cuota de Groq).
 
 **Evidencia:**
 - `src/paragraph_gen.py` — prompt modificado: eliminada línea `*(Fuente: {source})*`. Nuevo post-procesamiento con regex inyecta la URL real del `Item` en el título: `### [título](url)`.
@@ -76,6 +83,14 @@ consumo, no para restringir nada.
 - `AGENTS.md` — constraint actualizado: `Each news item title is a hyperlink to the original article`.
 - `CLAUDE.md` — constraints de formato y párrafo actualizados.
 - `text_cleaner.py` — sin cambios necesarios: ya convierte `[texto](url)` → `texto` para TTS.
+- **Bug encontrado:** la regex original (`^###\s+(.+)$`) asumía que el título capturado no traía corchetes
+  propios. Como el prompt le muestra al modelo el formato `### [Título descriptivo y directo]` — con
+  corchetes incluidos en el ejemplo — es muy probable que el modelo los reproduzca literalmente, dando
+  `### [[Título]](url)`. Verificado con `markdown.markdown()`: el enlace queda funcional, pero el texto
+  visible del `<h3>` sale como `[Título]`, con corchetes literales — visible en cada noticia del digest.
+  **Fix aplicado:** regex cambiada a `^###\s*\[?(.+?)\]?\s*$`, que tolera corchetes opcionales del modelo
+  y siempre reconstruye con exactamente un par. Verificado con ambos casos (con y sin corchetes del
+  modelo) dando el mismo resultado limpio.
 
 ### ~~Prioridad original 7 — Menor: timeout explícito en SMTP~~
 
@@ -118,6 +133,44 @@ consumo, no para restringir nada.
 - `src/relevance.py:126-167` — `deduplicate_by_event()`: una llamada LLM agrupa los top-20 items por el mismo evento. Se conserva el de mayor puntaje de cada grupo.
 - `src/main.py:68-74` — `_is_duplicate()`: dedup determinista por similitud de keywords (umbral 0.65) durante `select_by_quota()`.
 - Estos dos mecanismos cubren el caso original del backlog (Guardian + BBC cubriendo el mismo evento con distinto titular). Falta verificación en producción para confirmar que no pasan duplicados.
+
+### ~~Consistencia — `deduplicate_by_event()` reincidía en el mismo problema de `max_tokens` ajustado~~
+
+**Cerrado en:** revisión posterior a `85b4163` (sin correr el pipeline; cambio de una constante, sin
+necesidad de probar contra Groq).
+
+**Evidencia:**
+- `src/relevance.py` — `deduplicate_by_event()` usaba `max_tokens=300`, el mismo valor que se acababa de
+  identificar como insuficiente para el modelo reasoning en `relevance.py`'s `filter_items()`. Subido a
+  600 para ser consistente con el criterio ya establecido en la Prioridad original 1.
+
+### ~~Nueva — Arquitectura de dos modelos Groq: volumen con `llama-3.3-70b-versatile`, revisión editorial con `gpt-oss-120b`~~
+
+**Cerrado en:** revisión posterior a `85b4163` (sin correr el pipeline; cambio de default de env var,
+requiere verificarse en la próxima corrida real).
+
+Esto no estaba en el backlog original como ítem propio, pero surgió de una inconsistencia real detectada
+en revisión: `BLUEPRINT.md` ya describía este split de dos modelos en un párrafo, pero **se contradecía
+con el resto del mismo documento** (que decía `gpt-oss-120b` para todo) y con `config.py`/`.env.example`
+(que también defaulteaban todo a `gpt-oss-120b`). El usuario confirmó que el split de dos modelos sí es
+el diseño querido — no solo una corrección de documentación, sino una funcionalidad que faltaba terminar
+de implementar.
+
+**Evidencia:**
+- `src/config.py` — `LLM_MODEL` default cambiado de `openai/gpt-oss-120b` → `llama-3.3-70b-versatile`.
+  `EDITORIAL_MODEL` se mantiene en `openai/gpt-oss-120b`.
+- `.env.example` — mismo cambio, con comentario explicando el porqué del split (dos cuotas diarias
+  independientes: 100K/día para `llama-3.3-70b-versatile`, 200K/día para `gpt-oss-120b`).
+- `BLUEPRINT.md` — reconciliado en todos los lugares donde se mencionaba el modelo (diagrama, requisitos,
+  ejemplo de `.env`, tabla nueva en "Pipeline de Curación" con `max_tokens` por etapa) para que no haya
+  ninguna contradicción interna.
+- `AGENTS.md` y `CLAUDE.md` — actualizados como versiones simplificadas consistentes con `BLUEPRINT.md`;
+  también se agregó la documentación de la etapa de dedup (`deduplicate_by_event`, `_is_duplicate`) que
+  faltaba en ambos desde que se implementó en `85b4163`.
+- **Nota importante:** no se pudo correr el pipeline para confirmar que `llama-3.3-70b-versatile` sigue
+  produciendo el formato esperado (`PUNTAJE:`/`ACCIÓN:`/`SECCIÓN:`/`MOTIVO:` en relevancia, título+párrafo
+  en la generación) — al ser un modelo distinto al que se usó para afinar esos prompts, conviene revisar
+  la primera corrida real con atención antes de asumir que el comportamiento es idéntico.
 
 ---
 

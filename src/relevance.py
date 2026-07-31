@@ -135,7 +135,7 @@ def deduplicate_by_event(items: list[Item]) -> list[Item]:
         summary = re.sub(r"\s+", " ", item.summary[:150]).strip()
         lines.append(f"{i}. [{item.section[:20]}] {item.source} | {title} — {summary}")
 
-    answer = call_llm(DEDUP_SYSTEM_PROMPT, DEDUP_USER_PROMPT.format(items="\n".join(lines)), max_tokens=300)
+    answer = call_llm(DEDUP_SYSTEM_PROMPT, DEDUP_USER_PROMPT.format(items="\n".join(lines)), max_tokens=600)
     if not answer:
         print("  (dedup: sin respuesta, se omite)")
         return items

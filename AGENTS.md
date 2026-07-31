@@ -4,15 +4,17 @@
 
 **Pipeline implemented in `src/`.** Single source of truth for design intent: `BLUEPRINT.md`. Read it before modifying the pipeline.
 
-- LLM backend: **Groq** (model: `openai/gpt-oss-120b`) — free tier, no prepay required
-- Env key: `GROQ_API_KEY`
-- Model is a *reasoning* model: it spends tokens on chain-of-thought before answering, so `max_tokens` must be generous (relevance=600, paragraph=800, editorial review=1500) or it returns empty strings
-- Groq free tier: **100K tokens/day** for `llama-3.3-70b-versatile` (pipeline volume), **200K tokens/day** for `openai/gpt-oss-120b` (editorial review). One daily run uses ~60-70K. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion fails fast (no futile retries)
+- LLM backend: **Groq**, two models with two independent daily quotas — see `BLUEPRINT.md` "Pipeline de Curación" table for the authoritative breakdown
+  - `LLM_MODEL` (default `llama-3.3-70b-versatile`, non-reasoning, **100K tokens/day**) — stages 1, 2, 5 (relevance, dedup, paragraph)
+  - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, **200K tokens/day**) — stage 6 (editorial review) only
+- Env key: `GROQ_API_KEY`; `call_llm(..., model=...)` picks the model per call, defaults to `LLM_MODEL`
+- `EDITORIAL_MODEL` is a reasoning model: it spends tokens on hidden chain-of-thought before answering, so its `max_tokens` must stay generous or it returns empty/truncated text — `llm.py` logs `⚠ TRUNCADO` when `finish_reason == "length"` to catch this without guessing. Current values: relevance=600, dedup=600, paragraph=800, editorial review=1500 — `LLM_MODEL` doesn't need the headroom but keeps the same generous caps for margin.
+- One daily run uses ~60-70K combined. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion fails fast (no futile retries)
 
 ## Architecture (from BLUEPRINT.md)
 
-- Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → LLM dedup by event → quota-based selection → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
-- Selection quotas (`main.py`): Costa Rica min 3 / max 5, Geopolítica max 6, Tecnología max 5, total max 15 items (~10-12 min audio)
+- Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → LLM dedup by event → quota-based selection (with a second, deterministic keyword-similarity dedup) → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
+- Selection quotas (`main.py`): Costa Rica min 3 / max 5, Geopolítica max 6, Tecnología max 5, total max 15 items (~10-12 min audio); `_is_duplicate()` skips candidates with ≥0.65 keyword-Jaccard similarity to an already-selected item
 - Editorial review uses a separate reasoning model (`EDITORIAL_MODEL`, default `openai/gpt-oss-120b`) — gives it a distinct daily quota
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
@@ -28,7 +30,7 @@
 - `web_searcher.py` — RSS aggregation (6 items/feed max)
 - `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection)
 - `article_fetcher.py` — `requests` + manual gzip/br decompression + `trafilatura` (Semanario needs this)
-- `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=600)
+- `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=800); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
 - `editorial_review.py` — second-pass review (max_tokens=1500, `EDITORIAL_MODEL`)
 - `llm.py` — Groq client, retries on transient 429 only, `model` param per call
 - `html_generator.py`, `text_cleaner.py`, `tts_engine.py`, `email_sender.py` — output stage
@@ -66,7 +68,7 @@ logs/
 ## Key style constraints
 
 - LLM prompts (see BLUEPRINT.md) are exact — must be sent verbatim. They live in `relevance.py`, `paragraph_gen.py`, and `editorial_review.py`
-- Each news item title is a hyperlink to the original article (`### [Título](url)`)
+- Each news item title is a hyperlink to the original article (`### [Título](url)`) — Python guarantees exactly one bracket pair regardless of whether the model echoed brackets in its own output
 - Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis
 - Temp files (MP3, HTML) deleted after successful email send
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)

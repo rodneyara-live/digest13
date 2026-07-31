@@ -22,7 +22,7 @@ flowchart TD
 
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
-            C --> D["🤖 Groq API (openai/gpt-oss-120b)<br/>Curación con razonamiento"]:::api
+            C --> D["🤖 Groq API (llama-3.3-70b-versatile)<br/>Curación de volumen"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
             D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
             D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
@@ -60,7 +60,10 @@ flowchart TD
 * `trafilatura` (Extracción de texto limpio de artículos).
 
 * **Servicios Externos:**
-* API Key de Groq (Gratuito / Sin prepago necesario). Modelo `openai/gpt-oss-120b` con **200K tokens/día**; un run diario consume ~60-70K.
+* API Key de Groq (Gratuito / Sin prepago necesario). Dos modelos con cuotas diarias **independientes**:
+  * `llama-3.3-70b-versatile` (no-reasoning) para las etapas de volumen (1 a 5) — **100K tokens/día**.
+  * `openai/gpt-oss-120b` (reasoning) solo para la revisión editorial final (etapa 6) — **200K tokens/día**.
+  Un run diario consume ~60-70K en total entre ambos.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -105,7 +108,7 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 ```ini
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
-LLM_MODEL="openai/gpt-oss-120b"
+LLM_MODEL="llama-3.3-70b-versatile"
 EDITORIAL_MODEL="openai/gpt-oss-120b"
 
 # Configuración de la Voz (TTS)
@@ -154,7 +157,14 @@ Esto evita que el TTS lea en voz alta símbolos de formato.
 
 ## 🎯 Pipeline de Curación (LLM + Cuotas)
 
-El pipeline usa dos modelos: `llama-3.3-70b-versatile` para el volumen (etapas 1-5) y `openai/gpt-oss-120b` —modelo *reasoning*— para la revisión editorial (etapa 6). `call_llm` acepta `model` por llamada. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles.
+El pipeline usa dos modelos de Groq, cada uno con su propia cuota diaria, para no competir por el mismo presupuesto de tokens:
+
+| Modelo | Uso | Etapas | `max_tokens` |
+|--------|-----|--------|--------------|
+| `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) | Volumen: filtrar, agrupar, redactar | 1 (relevancia), 2 (dedup), 5 (párrafo) | 600 / 600 / 800 |
+| `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 1500 |
+
+`call_llm` en `llm.py` acepta `model` por llamada (default `LLM_MODEL`); `editorial_review.py` pasa explícitamente `model=EDITORIAL_MODEL`. Como `gpt-oss-120b` es un modelo *reasoning* que gasta tokens en cadena de pensamiento oculta antes de responder, su `max_tokens` debe ser generoso o la respuesta llega vacía o truncada — `llm.py` loguea `⚠ TRUNCADO` cuando `finish_reason == "length"` para detectar esto sin adivinar. `llama-3.3-70b-versatile` no tiene ese costo oculto, pero se le dejan los mismos límites generosos por margen, no por necesidad. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles.
 
 ### Etapa 1 — Filtro de relevancia (`relevance.py`)
 
@@ -203,7 +213,7 @@ Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br
 [Párrafo de 3 a 5 oraciones: HECHO con cifras/nombres/fechas, CONTEXTO, IMPLICACIÓN.]
 ```
 
-El LLM genera solo título y párrafo. En Python, se inyecta la URL real del `Item` en el título (`### [título](url)`) — el modelo nunca escribe la URL. Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=800`, temperatura 0.4.
+El LLM genera solo título y párrafo — nunca escribe la URL. En Python, una regex captura el texto del título de la línea `###` **tolerando que el modelo lo haya envuelto en corchetes o no** (`^###\s*\[?(.+?)\]?\s*$`) y lo reconstruye como `### [título](url)` con la URL real del `Item`. Esto evita tanto URLs inventadas por el modelo como corchetes duplicados (`[[título]]`) si el modelo copió el formato de ejemplo literalmente. Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=800`, temperatura 0.4.
 
 ### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
