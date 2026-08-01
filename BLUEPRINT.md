@@ -209,6 +209,11 @@ MOTIVO: [razón breve]
 
 Criterios de rechazo (PUNTAJE = 1): deportes/fútbol, efemérides/aniversarios, noticias universitarias (SINDEU, fedes), comunicados de prensa corporativos, pifias diplomáticas/mapas errados, lanzamientos de gadgets de consumo, videojuegos a precio completo, **pseudociencia/medicina alternativa/homeopatía**, **contenido antivacunas**, **reportajes sobre doulas/partos no asistidos como alternativa a la atención médica profesional**.
 
+Si la respuesta del modelo no trae una línea `PUNTAJE:`/`ACCIÓN:` parseable, `_parse_score()`/`_parse_action()`
+devuelven `None` y el item se descarta como `MALFORMADO` — **no** como `RECHAZADO`. Un modelo que ignora el
+formato (p. ej. un fallback poco familiarizado con el prompt) no debe verse indistinguible de un día real de
+pocas noticias relevantes; `filter_items()` avisa con un resumen `⚠ N/M respuestas malformadas` cuando esto pasa.
+
 ### Etapa 2 — Deduplicación por evento (`relevance.py: deduplicate_by_event`)
 
 Una sola llamada LLM recibe los top-20 candidatos (ID, sección, fuente, título, fragmento de resumen) y responde `GRUPO: [IDs]` por cada grupo de items que cubren el **mismo evento**. Se conserva el de mayor puntaje de cada grupo. Esto resuelve el caso de varias fuentes RSS cubriendo la misma noticia de última hora con redacción distinta (p. ej. la crisis de Ceuta en BBC + Guardian). Un filtro determinista por similitud de keywords (umbral 0.65) en la selección complementa para duplicados casi idénticos.
@@ -225,6 +230,12 @@ Tras la dedup, se seleccionan items por puntaje respetando cuotas por sección:
 | **Total** | **máx 15 items** (~10-12 min de audio) |
 
 Pase 1: se fuerza el mínimo de Costa Rica. Pase 2: se llenan los cupos restantes por puntaje global, respetando los máximos por sección.
+
+**Piso mínimo de envío:** si tras generar los párrafos el total queda por debajo de `MIN_ITEMS_FOR_DIGEST`
+(5), `main.py` aborta (`sys.exit(1)`, sin enviar correo) en vez de despachar un digest de un par de
+noticias. Este piso existe porque la revisión editorial (Etapa 6) solo rechaza por *demasiadas* noticias
+del mismo evento, no por *muy pocas* — un colapso silencioso en el filtro de relevancia (ver nota de
+`MALFORMADO` en la Etapa 1) podía llegar hasta el envío sin que nada lo frenara.
 
 ### Etapa 4 — Descarga de artículo completo (`article_fetcher.py`)
 

@@ -33,6 +33,8 @@ SECTION_QUOTAS: dict[str, dict] = {
 }
 MAX_TOTAL = 15
 TOKEN_LIMIT = 60_000
+MIN_ITEMS_FOR_DIGEST = 5  # below this, treat the run as degenerate (e.g. a fallback model ignoring
+                          # the expected PUNTAJE/ACCIÓN format) rather than a genuinely slow news day
 
 LOG_DIR = PROJECT_ROOT / "logs"
 RUN_LOG = LOG_DIR / "digest13.log"
@@ -213,9 +215,10 @@ def main() -> None:
         item.paragraph_md = paragraph
         paragraphs.append(item)
 
-    if not paragraphs:
-        print("ERROR: No se generaron noticias")
-        _write_run_log("FALLO — No se generaron noticias", stats)
+    if len(paragraphs) < MIN_ITEMS_FOR_DIGEST:
+        reason = "No se generaron noticias" if not paragraphs else f"Solo se generaron {len(paragraphs)} noticias (mínimo {MIN_ITEMS_FOR_DIGEST})"
+        print(f"ERROR: {reason}")
+        _write_run_log(f"FALLO — {reason}", stats)
         sys.exit(1)
 
     news_text = assemble(paragraphs)

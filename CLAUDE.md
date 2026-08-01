@@ -37,7 +37,11 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
 2. **`relevance.filter_items()`** — one LLM call per item. The model scores 1-5, may RECHAZAR (reject),
    and may reassign the item's section. Items scoring <2 or marked RECHAZAR are dropped. The rejection
    criteria list (sports, pseudoscience, anti-vax, university PR, etc.) lives in the prompt itself —
-   changes to what gets filtered belong there, not in Python logic.
+   changes to what gets filtered belong there, not in Python logic. `_parse_action()`/`_parse_score()`
+   return `None` (not a default reject) when the model's answer doesn't contain a parseable
+   `ACCIÓN:`/`PUNTAJE:` line — this is logged as `MALFORMADO`, distinct from a genuine `RECHAZADO`, so a
+   model that ignores the expected format (e.g. an unfamiliar fallback) doesn't silently masquerade as a
+   slow news day.
 3. **`relevance.deduplicate_by_event()`** — one LLM call over the top-20 approved items (by score) asking
    the model to group items covering the *same* underlying event (e.g. the same story on Guardian + BBC).
    Keeps the highest-scored item per group, drops the rest. Returns the input unchanged if there are fewer
@@ -128,3 +132,8 @@ Everything downstream of RSS fetch operates on the same mutable `Item` dataclass
   these without checking that assumption still holds.
 - Temp MP3/HTML files are deleted only after a successful send; if you change error handling around
   `email_sender.send()`, keep that ordering so failures leave artifacts for debugging.
+- `main.py` aborts (`sys.exit(1)`, no email sent) if fewer than `MIN_ITEMS_FOR_DIGEST` (5) paragraphs
+  are generated — not just zero. A single-digit digest is treated as a degenerate run (most likely an
+  LLM not following the expected format) rather than a real slow news day, since nothing downstream
+  (editorial review's criteria are about *too many* same-event stories, not too few items) catches that
+  case otherwise.

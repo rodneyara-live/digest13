@@ -23,7 +23,8 @@
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
 - Failure alerting: `OnFailure=digest13-notify.service` triggers `on-failure.sh` which logs to `logs/failures.log`
-- `main.py` exits with `sys.exit(1)` on critical failures (empty filter, no paragraphs generated)
+- `main.py` exits with `sys.exit(1)` on critical failures (empty filter, fewer than `MIN_ITEMS_FOR_DIGEST`
+  (5) paragraphs generated — not just zero)
 - Error logging: `article_fetcher.py` and `web_searcher.py` log exception type and message on failures
 - Token logging: `llm.py` tracks tokens per model; `main.py` writes summary to `logs/digest13.log` after each run
 - Run log: `logs/digest13.log` accumulates a summary of each execution (items, tokens, status) — gitignored
@@ -34,7 +35,7 @@
 
 - `main.py` — orchestrator + `select_by_quota()`
 - `web_searcher.py` — RSS aggregation (6 items/feed max, articles older than 48h UTC are skipped)
-- `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection)
+- `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection); unparseable answers are logged as `MALFORMADO`, never silently treated as `RECHAZADO`
 - `article_fetcher.py` — `requests` + manual gzip/br decompression + `trafilatura` (Semanario needs this)
 - `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=800); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
 - `editorial_review.py` — strict quality gate (max_tokens=1500, `EDITORIAL_MODEL`); RECHAZADO stops the pipeline

@@ -41,14 +41,14 @@ SECCIÓN: [GEOPOLÍTICA Y AMÉRICA LATINA|POLÍTICA Y SOCIEDAD COSTARRICENSE|TEC
 MOTIVO: [razón breve]"""
 
 
-def _parse_score(answer: str) -> int:
+def _parse_score(answer: str) -> int | None:
     m = re.search(r"PUNTAJE\s*:\s*(\d+)", answer, re.IGNORECASE)
-    return int(m.group(1)) if m else 0
+    return int(m.group(1)) if m else None
 
 
-def _parse_action(answer: str) -> str:
+def _parse_action(answer: str) -> str | None:
     m = re.search(r"ACCIÓN\s*:\s*(APROBAR|RECHAZAR)", answer, re.IGNORECASE)
-    return m.group(1).upper() if m else "RECHAZAR"
+    return m.group(1).upper() if m else None
 
 
 def _parse_section(answer: str) -> str | None:
@@ -62,6 +62,7 @@ def _parse_section(answer: str) -> str | None:
 
 def filter_items(items: list[Item]) -> list[Item]:
     approved: list[Item] = []
+    malformed = 0
 
     for item in items:
         user = USER_PROMPT.format(
@@ -74,16 +75,23 @@ def filter_items(items: list[Item]) -> list[Item]:
             print(f"  ERROR: sin respuesta para {item.title[:60]}")
             continue
 
-        score = _parse_score(answer)
         action = _parse_action(answer)
+        score = _parse_score(answer)
+
+        # Distinguish "the model evaluated and rejected it" from "the model
+        # didn't follow the PUNTAJE:/ACCIÓN: format at all" — the latter must
+        # never be silently treated as a rejection, or a model that ignores
+        # the format (e.g. an unfamiliar fallback) tanks the whole run
+        # looking exactly like a legitimate low-relevance day.
+        if action is None or score is None:
+            malformed += 1
+            print(f"  MALFORMADO (no se pudo parsear PUNTAJE/ACCIÓN): {item.title[:60]} — respuesta: {answer[:100]!r}")
+            continue
 
         if action == "RECHAZAR" or score < 2:
             reason_match = re.search(r"MOTIVO\s*:\s*(.+)", answer, re.IGNORECASE | re.DOTALL)
             reason = reason_match.group(1).strip() if reason_match else "sin motivo"
-            if score > 0:
-                print(f"  RECHAZADO (score={score}): {item.title[:60]} — {reason}")
-            else:
-                print(f"  RECHAZADO: {item.title[:60]} — {reason}")
+            print(f"  RECHAZADO (score={score}): {item.title[:60]} — {reason}")
             continue
 
         section = _parse_section(answer)
@@ -95,6 +103,10 @@ def filter_items(items: list[Item]) -> list[Item]:
         reason_match = re.search(r"MOTIVO\s*:\s*(.+)", answer, re.IGNORECASE | re.DOTALL)
         reason = reason_match.group(1).strip()[:60] if reason_match else ""
         print(f"  APROBADO (score={score}): {item.title[:60]} — {reason}")
+
+    if malformed:
+        ratio = malformed / len(items) if items else 0
+        print(f"  ⚠ {malformed}/{len(items)} respuestas malformadas ({ratio:.0%}) — el modelo puede no estar siguiendo el formato PUNTAJE:/ACCIÓN:")
 
     return approved
 

@@ -106,7 +106,7 @@ cuota de Groq).
 
 ### ~~Prioridad original 1 (nueva) — Observabilidad: log de errores estructurado~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `d14a7b8` (2026-07-31)
 
 **Evidencia:**
 - `src/article_fetcher.py:41-42` — `except Exception as e: print(f"  ERROR [{type(e).__name__}]: {e} — {url[:60]}")`
@@ -115,7 +115,7 @@ cuota de Groq).
 
 ### ~~Prioridad original 2 (nueva) — Confiabilidad: alerta si el run falla o queda vacío~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `d14a7b8` (2026-07-31)
 
 **Evidencia:**
 - `src/main.py` — `sys.exit(1)` en los puntos de fallo crítico (filtro vacío, sin noticias generadas).
@@ -125,7 +125,7 @@ cuota de Groq).
 
 ### ~~Prioridad original 3 (nueva) — Calidad: deduplicación por título exacto puede dejar pasar duplicados temáticos~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `85b4163` (2026-07-31)
 
 **Evidencia:**
 - `src/relevance.py:126-167` — `deduplicate_by_event()`: una llamada LLM agrupa los top-20 items por el mismo evento. Se conserva el de mayor puntaje de cada grupo.
@@ -165,14 +165,35 @@ de implementar.
 - `AGENTS.md` y `CLAUDE.md` — actualizados como versiones simplificadas consistentes con `BLUEPRINT.md`;
   también se agregó la documentación de la etapa de dedup (`deduplicate_by_event`, `_is_duplicate`) que
   faltaba en ambos desde que se implementó en `85b4163`.
-- **Nota importante:** no se pudo correr el pipeline para confirmar que `llama-3.3-70b-versatile` sigue
-  produciendo el formato esperado (`PUNTAJE:`/`ACCIÓN:`/`SECCIÓN:`/`MOTIVO:` en relevancia, título+párrafo
-  en la generación) — al ser un modelo distinto al que se usó para afinar esos prompts, conviene revisar
-  la primera corrida real con atención antes de asumir que el comportamiento es idéntico.
+- **Nota importante (resuelta, ver ítem siguiente):** la corrida real reveló exactamente el riesgo que
+  esta nota anticipaba — un modelo que no sigue el formato esperado colapsaba el filtro de relevancia sin
+  que nada lo distinguiera de un día real de pocas noticias.
+
+### ~~Robustez: respuestas malformadas del LLM se contaban como rechazo editorial, sin piso mínimo antes de enviar~~
+
+**Cerrado en:** revisión posterior a `88a3b1b` (2026-08-01), sin gastar cuota de Groq — cambios de
+parseo/constantes verificados por lectura, no por corrida.
+
+**Problema (evidencia real, no hipotética):** `logs/digest13.log` — corrida `2026-08-01 09:43:29` con un
+modelo distinto al default en `LLM_MODEL`: de 48 items RSS solo 1 fue aprobado, y aun así `main.py` generó
+y envió el correo con un solo ítem. Causa raíz en `relevance.py`: `_parse_action()` devolvía `"RECHAZAR"`
+por defecto cuando no encontraba una línea `ACCIÓN:` parseable, y `_parse_score()` devolvía `0` cuando no
+encontraba `PUNTAJE:` — ambos casos se veían idénticos a un rechazo editorial legítimo en el log. Además,
+nada en `main.py` ponía un piso al tamaño final del digest antes de enviarlo.
+
+**Solución:**
+- `src/relevance.py` — `_parse_action()`/`_parse_score()` ahora devuelven `None` (no un default de
+  rechazo) cuando no encuentran su línea. `filter_items()` cuenta esos casos como `MALFORMADO`
+  (log distinto de `RECHAZADO`) y al final imprime `⚠ N/M respuestas malformadas` si el modelo no está
+  siguiendo el formato.
+- `src/main.py` — nueva constante `MIN_ITEMS_FOR_DIGEST = 5`; el chequeo que antes solo abortaba con
+  `paragraphs` vacío ahora aborta (`sys.exit(1)`, sin enviar correo) si el conteo final queda por debajo
+  de ese piso, no solo en cero.
+- `BLUEPRINT.md`, `CLAUDE.md`, `AGENTS.md` — documentado el comportamiento `MALFORMADO` y el piso mínimo.
 
 ### ~~Eficiencia: conteo real de tokens en vez de estimación~~
 
-**Cerrado en:** commit `pendiente` (2026-07-31)
+**Cerrado en:** commit `9e991c7` (2026-07-31)
 
 **Evidencia:**
 - `src/llm.py` — `get_token_usage()` expone `response.usage.total_tokens` de Groq en cada llamada.
