@@ -12,6 +12,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
+FILTER_MODEL = os.environ.get("FILTER_MODEL", "llama-3.1-8b-instant")
 EDITORIAL_MODEL = os.environ.get("EDITORIAL_MODEL", "openai/gpt-oss-120b")
 VOLUME_FALLBACK = os.environ.get("VOLUME_FALLBACK", "llama-3.1-8b-instant")
 REASONING_FALLBACK = os.environ.get("REASONING_FALLBACK", "openai/gpt-oss-20b")

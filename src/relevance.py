@@ -1,5 +1,6 @@
 import re
 from llm import call_llm
+from config import FILTER_MODEL
 from web_searcher import Item
 
 SYSTEM_PROMPT = "Eres un editor de noticias. Evalúa cada item con puntaje del 1 al 5."
@@ -70,7 +71,7 @@ def filter_items(items: list[Item]) -> list[Item]:
             source=item.source,
             summary=item.summary[:500],
         )
-        answer = call_llm(SYSTEM_PROMPT, user, max_tokens=600)
+        answer = call_llm(SYSTEM_PROMPT, user, max_tokens=600, model=FILTER_MODEL)
         if not answer:
             print(f"  ERROR: sin respuesta para {item.title[:60]}")
             continue
@@ -147,7 +148,12 @@ def deduplicate_by_event(items: list[Item]) -> list[Item]:
         summary = re.sub(r"\s+", " ", item.summary[:150]).strip()
         lines.append(f"{i}. [{item.section[:20]}] {item.source} | {title} — {summary}")
 
-    answer = call_llm(DEDUP_SYSTEM_PROMPT, DEDUP_USER_PROMPT.format(items="\n".join(lines)), max_tokens=600)
+    answer = call_llm(
+        DEDUP_SYSTEM_PROMPT,
+        DEDUP_USER_PROMPT.format(items="\n".join(lines)),
+        max_tokens=600,
+        model=FILTER_MODEL,
+    )
     if not answer:
         print("  (dedup: sin respuesta, se omite)")
         return items

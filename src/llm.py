@@ -1,13 +1,47 @@
 import os
 import time
 from groq import Groq
-from config import GROQ_API_KEY, LLM_MODEL, VOLUME_FALLBACK, REASONING_FALLBACK
+from config import (
+    GROQ_API_KEY,
+    LLM_MODEL,
+    FILTER_MODEL,
+    EDITORIAL_MODEL,
+    VOLUME_FALLBACK,
+    REASONING_FALLBACK,
+)
 
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 30.0
 
 _client = None
 _token_usage: dict[str, dict] = {}
+
+# Models whose daily quota (TPD) is already known to be spent in this run. Once a
+# model lands here every later call skips it and goes straight down the chain,
+# instead of burning a round-trip per call to rediscover it's dead.
+_exhausted: set[str] = set()
+
+
+def _build_fallback_chain() -> dict[str, str]:
+    """Map each primary model to its backup. Explicit, rather than inferred from
+    the shape of `call_llm`'s `model` argument — with three primaries there's no
+    longer a reliable way to guess which quota a caller belongs to."""
+    chain = {
+        # The filter model falls *up* to the paragraph model rather than dead-ending:
+        # with no model for stage 1 nothing gets approved and the run aborts, so
+        # spending paragraph headroom beats producing no digest. It defaults to the
+        # volume fallback itself, so this is the only way it gets a backup at all.
+        # 8b → 70b → 8b is a cycle; _first_available's `seen` guard terminates it.
+        FILTER_MODEL: LLM_MODEL,
+        LLM_MODEL: VOLUME_FALLBACK,
+        EDITORIAL_MODEL: REASONING_FALLBACK,
+    }
+    # A model is never its own fallback: FILTER_MODEL defaults to VOLUME_FALLBACK
+    # itself, and .env can point any primary straight at its backup.
+    return {primary: backup for primary, backup in chain.items() if primary != backup}
+
+
+FALLBACK_CHAIN = _build_fallback_chain()
 
 
 def _get_client():
@@ -69,29 +103,43 @@ def _call_single_model(model: str, system_prompt: str, user_prompt: str,
     return None
 
 
+def _mark_exhausted(model: str) -> None:
+    """Record a spent quota and announce the switch once, not once per call."""
+    if model in _exhausted:
+        return
+    _exhausted.add(model)
+    backup = FALLBACK_CHAIN.get(model)
+    if backup:
+        print(f"  ⚠ {model} agotado (TPD) → el resto de la corrida usa {backup}")
+    else:
+        print(f"  ✖ {model} agotado (TPD) y sin respaldo")
+
+
+def _first_available(primary: str) -> str | None:
+    """Walk the fallback chain past every model already out of quota."""
+    model = primary
+    seen: set[str] = set()
+    while model in _exhausted:
+        seen.add(model)
+        model = FALLBACK_CHAIN.get(model)
+        if model is None or model in seen:
+            return None
+    return model
+
+
 def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
              temperature: float = 0.3, model: str | None = None) -> str | None:
     if not GROQ_API_KEY:
         print("  No GROQ_API_KEY configured")
         return None
 
-    primary = model or LLM_MODEL
+    current = _first_available(model or LLM_MODEL)
 
-    # Determine fallback: editorial callers use reasoning fallback, others use volume fallback
-    if model and model == REASONING_FALLBACK:
-        fallback = None  # no fallback for the fallback itself
-    elif model:
-        fallback = REASONING_FALLBACK
-    else:
-        fallback = VOLUME_FALLBACK
+    while current is not None:
+        result = _call_single_model(current, system_prompt, user_prompt, max_tokens, temperature)
+        if result != "TPD_EXHAUSTED":
+            return result
+        _mark_exhausted(current)
+        current = _first_available(current)
 
-    result = _call_single_model(primary, system_prompt, user_prompt, max_tokens, temperature)
-
-    if result == "TPD_EXHAUSTED" and fallback:
-        print(f"  ⚠ {primary} agotado (TPD) → fallback a {fallback}")
-        result = _call_single_model(fallback, system_prompt, user_prompt, max_tokens, temperature)
-        if result == "TPD_EXHAUSTED":
-            print(f"  ✖ {fallback} también agotado — sin respuesta")
-            return None
-
-    return result if result != "TPD_EXHAUSTED" else None
+    return None

@@ -2,6 +2,7 @@ import asyncio
 import re
 import sys
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from pathlib import Path
 from config import PROJECT_ROOT, EMAIL_TO
@@ -9,7 +10,7 @@ from web_searcher import fetch_items
 from relevance import filter_items, deduplicate_by_event
 from article_fetcher import fetch_full_text
 from paragraph_gen import generate_paragraph
-from editorial_review import review
+from editorial_review import review, is_rejection, is_gate_failure
 from html_generator import build_html
 from text_cleaner import strip_markdown
 from tts_engine import synthesize
@@ -32,7 +33,7 @@ SECTION_QUOTAS: dict[str, dict] = {
     "TECNOLOGÍA": {"max": 5},
 }
 MAX_TOTAL = 15
-TOKEN_LIMIT = 60_000
+ARTICLE_WORKERS = 5  # article downloads are network-bound; the LLM calls stay serial
 MIN_ITEMS_FOR_DIGEST = 5  # below this, treat the run as degenerate (e.g. a fallback model ignoring
                           # the expected PUNTAJE/ACCIÓN format) rather than a genuinely slow news day
 
@@ -144,6 +145,24 @@ def select_by_quota(items: list) -> list:
     return selected
 
 
+def fetch_all_articles(items: list) -> dict[str, str]:
+    """Download every selected article at once, keyed by URL. Downloads dominate
+    the run's wall-clock (20s timeout each, serial before this) and cost nothing."""
+    texts: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=ARTICLE_WORKERS) as pool:
+        futures = {pool.submit(fetch_full_text, item.url): item for item in items}
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                text = future.result()
+            except Exception as e:
+                print(f"  ERROR [{type(e).__name__}]: {e} — {item.url[:60]}")
+                continue
+            if text:
+                texts[item.url] = text
+    return texts
+
+
 def assemble(items: list) -> str:
     sections: dict[str, list[str]] = {}
     for item in items:
@@ -188,30 +207,27 @@ def main() -> None:
     for it in selected:
         print(f"    [{it.score}] {it.section[:30]:30s} {it.title[:80]}")
 
-    approx_tokens = 0
+    print("Descargando artículos completos...")
+    article_texts = fetch_all_articles(selected)
+    stats["downloaded"] = len(article_texts)
+    print(f"  {len(article_texts)}/{len(selected)} artículos descargados")
 
-    print("Descargando artículos completos y generando párrafos...")
+    print("Generando párrafos...")
     paragraphs: list = []
     total = len(selected)
     for i, item in enumerate(selected, 1):
-        if approx_tokens >= TOKEN_LIMIT:
-            print(f"  [budget agotado] procesados {i-1}/{total}, restantes saltados")
-            break
-
         print(f"  [{i}/{total}] {item.source} — {item.title[:70]}")
-        full_text = fetch_full_text(item.url)
+        full_text = article_texts.get(item.url)
         if not full_text:
             print(f"    → no se pudo descargar el artículo")
             continue
 
-        stats["downloaded"] += 1
         paragraph = generate_paragraph(item, full_text)
         if not paragraph:
             print(f"    → no se pudo generar párrafo")
             continue
 
         stats["paragraphs"] += 1
-        approx_tokens += (len(full_text[:2500]) + len(paragraph)) // 4
         item.paragraph_md = paragraph
         paragraphs.append(item)
 
@@ -226,19 +242,19 @@ def main() -> None:
     (PROJECT_ROOT / "debug_news.txt").write_text(news_text, encoding="utf-8")
 
     print("Revisión editorial...")
-    approx_tokens += len(news_text) // 4
     editorial_blocked = False
-    if approx_tokens < TOKEN_LIMIT:
-        review_result = review(news_text)
-        if review_result:
-            print(f"  Pendiente de corrección: {review_result[:200]}")
-            if review_result.upper().startswith("RECHAZADO"):
-                editorial_blocked = True
-                print("  ✖ DIGEST RECHAZADO por el editor — no se envía")
-        else:
-            print("  APROBADO")
+    gate_failed = False
+    review_result = review(news_text)
+    if review_result:
+        print(f"  Pendiente de corrección: {review_result[:200]}")
+        if is_rejection(review_result):
+            editorial_blocked = True
+            print("  ✖ DIGEST RECHAZADO por el editor — no se envía")
+        elif is_gate_failure(review_result):
+            gate_failed = True
+            print("  ⚠ el editor no respondió — el digest se envía SIN revisar")
     else:
-        print("  (saltada por presupuesto de tokens)")
+        print("  APROBADO")
 
     if editorial_blocked:
         _write_run_log("FALLO — Digest rechazado por editor", stats)
@@ -260,7 +276,10 @@ def main() -> None:
     mp3_path.unlink(missing_ok=True)
     html_path.unlink(missing_ok=True)
 
-    _write_run_log(f"OK — correo enviado a {EMAIL_TO}", stats)
+    status = f"OK — correo enviado a {EMAIL_TO}"
+    if gate_failed:
+        status += " (SIN revisión editorial: el editor no respondió)"
+    _write_run_log(status, stats)
     print("¡Listo! Digest 13 entregado.")
 
 
