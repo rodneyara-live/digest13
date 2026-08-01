@@ -52,6 +52,20 @@ consumo, no para restringir nada.
 
 ## Items cerrados
 
+### ~~Deliverability: correos van a spam por mismatch FROM/SMTP~~
+
+**Cerrado en:** commit `bfbd455` (2026-08-01)
+
+**Problema:** los correos enviados desde Brevo con remitente `@live.com` iban a spam porque el dominio gratuito no puede autenticarse con SPF/DKIM/DMARC. Microsoft rechaza o marca como spam cualquier correo FROM `@live.com` que no venga de sus propios servidores.
+
+**Solución:** usar Gmail SMTP directo (`smtp.gmail.com`). El FROM y el SMTP son del mismo proveedor → sin mismatch → deliverability perfecta.
+
+**Evidencia:**
+- `.env` — configurado con `SMTP_SERVER="smtp.gmail.com"`, `SMTP_USERNAME="rodneyara@gmail.com"`, app password con espacios.
+- `.env.example` — documentado Gmail como Opción A, Brevo como Opción B.
+- `BLUEPRINT.md` — sección SMTP actualizada con tabla comparativa Gmail vs Brevo.
+- Test manual exitoso: correo entregado tanto a `rodneyara@gmail.com` como a `rodneyara@live.com`.
+
 ### ~~Prioridad original 1 — `max_tokens` demasiado ajustados, riesgo de rechazo silencioso~~
 
 **Cerrado en:** commit `0f0f805` (2026-07-31)
