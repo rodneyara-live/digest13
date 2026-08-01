@@ -32,8 +32,8 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
 [src/main.py](src/main.py):
 
 1. **`web_searcher.fetch_items()`** — polls 6 RSS feeds across 3 hardcoded sections (Geopolítica, Costa
-   Rica, Tecnología), dedupes by title, caps at `MAX_PER_FEED=6` items/feed. Returns `Item` dataclasses
-   (section, title, source, url, summary, score, paragraph_md).
+   Rica, Tecnología), dedupes by title, caps at `MAX_PER_FEED=6` items/feed, and skips articles older
+   than 48 hours (UTC). Returns `Item` dataclasses (section, title, source, url, summary, score, paragraph_md).
 2. **`relevance.filter_items()`** — one LLM call per item. The model scores 1-5, may RECHAZAR (reject),
    and may reassign the item's section. Items scoring <2 or marked RECHAZAR are dropped. The rejection
    criteria list (sports, pseudoscience, anti-vax, university PR, etc.) lives in the prompt itself —
@@ -58,10 +58,11 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
    whether the model wrapped its own title in brackets or not — this guarantees exactly one bracket pair
    and a real URL regardless of what the model did. Input truncated to 2500 chars, `max_tokens=800`.
    Banned phrases ("es importante", "genera debate", etc.) are enforced by the prompt.
-7. **`editorial_review.review()`** — single LLM call over the entire assembled digest (max 8000 chars,
-   `max_tokens=1500`, uses `EDITORIAL_MODEL` not `LLM_MODEL`) checking structure, banned-phrase compliance,
-   and same-event duplicates that slipped past the two dedup passes. Returns `None`/empty on APROBADO,
-   otherwise a correction list that is currently only logged, not auto-applied.
+7. **`editorial_review.review()`** — strict quality gate (single LLM call, max 8000 chars,
+   `max_tokens=1500`, uses `EDITORIAL_MODEL`). Rejects the entire digest if it detects broken format
+   (JSON, thinking text, bullet lists), empty paragraphs, celebrity gossip, fabricated data, or >2
+   stories on the same event. On RECHAZADO, `main.py` aborts the email send and logs the failure.
+   Returns `None` on APROBADO, otherwise a correction list.
 8. **`html_generator.build_html()`** / **`text_cleaner.strip_markdown()`** / **`tts_engine.synthesize()`**
    — build the final HTML (audio embedded via `cid:audio_resumen_mp3`, not a URL) and the MP3 (via
    `edge-tts`, default voice `es-CR-MariaNeural`) in parallel-ish sequence; TTS runs on markdown stripped
@@ -89,7 +90,11 @@ editorial review=1500. `LLM_MODEL` doesn't carry the same hidden-reasoning cost 
 generous caps anyway — headroom is cheap since `max_tokens` only bounds spend, it doesn't pre-allocate it.
 
 Retries 3x on 429 with linear backoff (30s, 60s, 90s), except when the error text contains "tokens per
-day" (TPD quota exhausted) — that fails immediately without wasting a retry cycle. One full run uses
+day" (TPD quota exhausted) — that triggers automatic fallback to a backup model:
+- Volume: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+- Reasoning: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` (200K TPD)
+
+If both models in a chain are exhausted, the call returns `None`. One full run uses
 ~60-70K combined across both models. Token usage is tracked per-model via `response.usage.total_tokens`
 (exposed by Groq), accumulated in `llm.py`'s `_token_usage` dict, and written to `logs/digest13.log`
 after each run by `main.py`'s `_write_run_log()` function.

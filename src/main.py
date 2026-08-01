@@ -224,14 +224,22 @@ def main() -> None:
 
     print("Revisión editorial...")
     approx_tokens += len(news_text) // 4
+    editorial_blocked = False
     if approx_tokens < TOKEN_LIMIT:
         review_result = review(news_text)
         if review_result:
             print(f"  Pendiente de corrección: {review_result[:200]}")
+            if review_result.upper().startswith("RECHAZADO"):
+                editorial_blocked = True
+                print("  ✖ DIGEST RECHAZADO por el editor — no se envía")
         else:
             print("  APROBADO")
     else:
         print("  (saltada por presupuesto de tokens)")
+
+    if editorial_blocked:
+        _write_run_log("FALLO — Digest rechazado por editor", stats)
+        sys.exit(1)
 
     html_path = PROJECT_ROOT / HTML_FILENAME
     print("Construyendo HTML...")

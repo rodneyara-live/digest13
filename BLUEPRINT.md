@@ -64,6 +64,10 @@ flowchart TD
   * `llama-3.3-70b-versatile` (no-reasoning) para las etapas de volumen (1 a 5) — **100K tokens/día**.
   * `openai/gpt-oss-120b` (reasoning) solo para la revisión editorial final (etapa 6) — **200K tokens/día**.
   Un run diario consume ~60-70K en total entre ambos.
+* **Fallback automático:** si un modelo agota su TPD (tokens per day), `call_llm()` cambia automáticamente al modelo de respaldo:
+  * Volume: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+  * Reasoning: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` (200K TPD)
+  Configurable via `VOLUME_FALLBACK` y `REASONING_FALLBACK` en `.env`.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -157,6 +161,8 @@ El pipeline recolecta titulares y sumarios de las siguientes fuentes RSS antes d
 
 Cada entrada incluye su fuente (`[The Guardian]`). El título de cada noticia se convierte en un hipervínculo al artículo original (`### [Título](url)`). El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
 
+**Filtro de fecha:** solo se procesan artículos de las últimas 48 horas (UTC). Si una entrada no tiene fecha o es más vieja, se descarta automáticamente. Esto evita que noticias de días anteriores reaparezcan y consuman tokens innecesariamente.
+
 ---
 
 ## 🗣️ Limpieza de Texto para TTS
@@ -235,7 +241,13 @@ El LLM genera solo título y párrafo — nunca escribe la URL. En Python, una r
 
 ### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
-El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) para una segunda pasada que verifica: estructura (`### [Título](url)` + párrafo), ausencia de frases vagas, uso de datos concretos y **detección de dos noticias que cubren el mismo evento**. Responde `APROBADO` o una lista de correcciones específicas. `max_tokens=1500`, temperatura 0.2.
+El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) como **última línea de defensa de calidad**. El editor verifica:
+
+- **RECHAZA** si detecta: formato roto (JSON, XML, thinking visible, viñetas), párrafos vacíos, contenido de farándula/basura, datos inventados, o más de 2 noticias del mismo evento
+- **CORRIGE** si detecta: estructura incorrecta, frases vagas prohibidas, párrafos demasiado largos/cortos, noticias repetidas que deben fusionarse
+- **APROBA** solo si el digest es apto para publicación
+
+Si el editor responde `RECHAZADO`, `main.py` aborta el envío de correo y escribe el fallo en el log. `max_tokens=1500`, temperatura 0.2.
 
 ---
 

@@ -1,19 +1,34 @@
 from llm import call_llm
 from config import EDITORIAL_MODEL
 
-SYSTEM_PROMPT = "Eres un editor en jefe que revisa calidad y consistencia editorial."
+SYSTEM_PROMPT = """Eres el editor en jefe y ÚLTIMA línea de defensa de calidad del boletín "Digest 13".
+Tu trabajo es RECHAZAR o CORREGIR — no aprobar ciegamente.
 
-USER_PROMPT = """Revisa este informe:
+Criterios de RECHAZO (si cualquiera aplica, RECHAZA el digest completo):
+- Párrafos con formato roto: JSON, XML, thinking/reasoning visible, listas con viñetas, o cualquier cosa que no sea ### [Título](url) + párrafo en prosa
+- Párrafos vacíos o que solo contienen el título sin contenido
+- Contenido de farándula, espectáculos, chismes, o basura que no encaja en geopolítica/CR/tech
+- Datos inventados o contradictorios entre noticias del mismo evento
+- Más de 2 noticias cubriendo el MISMO evento de fondo (indica cuáles consolidar)
+
+Criterios de CORRECCIÓN (lista los problemas encontrados):
+- Estructura incorrecta (falta ###, falta url, falta párrafo)
+- Frases vagas prohibidas: "es importante", "genera debate", "situación delicada", "es un logro/paso"
+- Párrafo demasiado largo o demasiado corto (menos de 3 oraciones)
+- Noticias repetidas o muy similares que deben fusionarse
+
+Formato de respuesta:
+- Si el digest es APTO para publicación: responde SOLO "APROBADO"
+- Si hay problemas: responde una lista numerada de problemas y qué hacer con cada uno
+- Si el digest es RECHAZABLE: responde "RECHAZADO: [razón]" y lista las noticias que deben eliminarse"""
+
+
+USER_PROMPT = """Revisa este informe completo:
 
 {news_text}
 
-Verifica cada noticia:
-1. ¿Tiene estructura ### [Título](url) + párrafo?
-2. ¿Evita frases vagas como "es importante", "genera debate", "situación delicada", "es un logro/paso importante"?
-3. ¿Usa datos concretos (cifras, nombres, fechas)?
-4. ¿Hay dos noticias que cubren el MISMO evento o la misma noticia de fondo? Si sí, indica el título exacto de la que conservar y de la que descartar.
-
-Responde solo APROBADO o una lista de correcciones específicas."""
+Lee CADA noticia. Verifica la estructura, el contenido y la calidad general.
+Responde APROBADO, una lista de correcciones, o RECHAZADO."""
 
 
 def review(news_text: str) -> str | None:

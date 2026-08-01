@@ -8,8 +8,12 @@
   - `LLM_MODEL` (default `llama-3.3-70b-versatile`, non-reasoning, **100K tokens/day**) — stages 1, 2, 5 (relevance, dedup, paragraph)
   - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, **200K tokens/day**) — stage 6 (editorial review) only
 - Env key: `GROQ_API_KEY`; `call_llm(..., model=...)` picks the model per call, defaults to `LLM_MODEL`
+- **Fallback chain:** when a model exhausts its TPD, `call_llm()` auto-switches to fallback:
+  - Volume: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` (500K TPD, non-reasoning)
+  - Reasoning: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` (200K TPD)
+  Configurable via `VOLUME_FALLBACK` / `REASONING_FALLBACK` in `.env`
 - `EDITORIAL_MODEL` is a reasoning model: it spends tokens on hidden chain-of-thought before answering, so its `max_tokens` must stay generous or it returns empty/truncated text — `llm.py` logs `⚠ TRUNCADO` when `finish_reason == "length"` to catch this without guessing. Current values: relevance=600, dedup=600, paragraph=800, editorial review=1500 — `LLM_MODEL` doesn't need the headroom but keeps the same generous caps for margin.
-- One daily run uses ~60-70K combined. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion fails fast (no futile retries)
+- One daily run uses ~60-70K combined. `call_llm` retries on 429 only for transient rate limits; TPD exhaustion auto-switches to fallback model (no futile retries on exhausted model)
 
 ## Architecture (from BLUEPRINT.md)
 
@@ -29,11 +33,11 @@
 ## Source files (current)
 
 - `main.py` — orchestrator + `select_by_quota()`
-- `web_searcher.py` — RSS aggregation (6 items/feed max)
+- `web_searcher.py` — RSS aggregation (6 items/feed max, articles older than 48h UTC are skipped)
 - `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection)
 - `article_fetcher.py` — `requests` + manual gzip/br decompression + `trafilatura` (Semanario needs this)
 - `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=800); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
-- `editorial_review.py` — second-pass review (max_tokens=1500, `EDITORIAL_MODEL`)
+- `editorial_review.py` — strict quality gate (max_tokens=1500, `EDITORIAL_MODEL`); RECHAZADO stops the pipeline
 - `llm.py` — Groq client, retries on transient 429 only, `model` param per call
 - `html_generator.py`, `text_cleaner.py`, `tts_engine.py`, `email_sender.py` — output stage
 

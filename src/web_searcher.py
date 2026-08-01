@@ -1,5 +1,6 @@
 import feedparser
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -40,6 +41,7 @@ FEEDS: list[tuple[str, list[str]]] = [
 ]
 
 MAX_PER_FEED = 6
+MAX_AGE_HOURS = 48  # only fetch articles from the last 48 hours (UTC)
 
 
 def _source_name(url: str) -> str:
@@ -65,6 +67,16 @@ def fetch_items() -> list[Item]:
                     link = entry.get("link") or ""
                     if not title and not summary:
                         continue
+                    # Date filter: skip articles older than MAX_AGE_HOURS
+                    published = entry.get("published_parsed") or entry.get("updated_parsed")
+                    if published:
+                        try:
+                            pub_dt = datetime(*published[:6], tzinfo=timezone.utc)
+                            age_hours = (datetime.now(timezone.utc) - pub_dt).total_seconds() / 3600
+                            if age_hours > MAX_AGE_HOURS:
+                                continue
+                        except (TypeError, ValueError):
+                            pass  # if date parsing fails, include the article
                     key = title or summary[:80]
                     if key in seen:
                         continue

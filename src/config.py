@@ -13,6 +13,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
 EDITORIAL_MODEL = os.environ.get("EDITORIAL_MODEL", "openai/gpt-oss-120b")
+VOLUME_FALLBACK = os.environ.get("VOLUME_FALLBACK", "llama-3.1-8b-instant")
+REASONING_FALLBACK = os.environ.get("REASONING_FALLBACK", "openai/gpt-oss-20b")
 TTS_VOICE = os.environ.get("TTS_VOICE", "es-CR-MariaNeural")
 SMTP_SERVER = os.environ["SMTP_SERVER"]
 SMTP_PORT = int(os.environ["SMTP_PORT"])
