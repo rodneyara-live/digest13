@@ -159,7 +159,7 @@ def deduplicate_by_event(items: list[Item]) -> list[Item]:
         print("  (dedup: SIN DUPLICADOS)")
         return items
 
-    dropped = {pool[idx - 1] for idx in drop}
+    dropped = [pool[idx - 1] for idx in drop]
     kept = [item for item in items if item not in dropped]
     print(f"  dedup: {len(drop)} duplicado(s) descartado(s):")
     for idx in sorted(drop):
