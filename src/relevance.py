@@ -7,9 +7,9 @@ SYSTEM_PROMPT = "Eres un editor de noticias. Evalúa cada item con puntaje del 1
 USER_PROMPT = """Evalúa este artículo para el boletín informativo "Digest 13".
 
 ## Secciones del boletín
-• GEOPOLÍTICA Y AMÉRICA LATINA: conflictos armados, macroeconomía, relaciones bilaterales, crisis de gobernanza, control de recursos, comercio internacional, política exterior.
-• POLÍTICA Y SOCIEDAD COSTARRICENSE: fiscalización del poder público, proyectos de ley, resoluciones judiciales, deuda, inflación, infraestructura, seguridad, salud pública, educación.
-• TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE: IA, ciberseguridad, hardware, software, soberanía digital, regulación tecnológica, startups.
+• MUNDO: conflictos armados, macroeconomía, relaciones bilaterales, crisis de gobernanza, control de recursos, comercio internacional, política exterior.
+• COSTA RICA: fiscalización del poder público, proyectos de ley, resoluciones judiciales, deuda, inflación, infraestructura, seguridad, salud pública, educación.
+• TECNOLOGÍA: IA, ciberseguridad, hardware, software, soberanía digital, regulación tecnológica, startups.
 
 ## Criterios de RECHAZO (PUNTAJE = 1)
 - Deportes, fútbol, Mundiales, competencias atléticas
@@ -37,7 +37,7 @@ Responde estrictamente este formato:
 
 PUNTAJE: [1-5]
 ACCIÓN: [APROBAR|RECHAZAR]
-SECCIÓN: [GEOPOLÍTICA Y AMÉRICA LATINA|POLÍTICA Y SOCIEDAD COSTARRICENSE|TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE]
+SECCIÓN: [MUNDO|COSTA RICA|TECNOLOGÍA]
 MOTIVO: [razón breve]"""
 
 
@@ -53,7 +53,7 @@ def _parse_action(answer: str) -> str | None:
 
 def _parse_section(answer: str) -> str | None:
     m = re.search(
-        r"SECCIÓN\s*:\s*(GEOPOLÍTICA Y AMÉRICA LATINA|POLÍTICA Y SOCIEDAD COSTARRICENSE|TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE)",
+        r"SECCIÓN\s*:\s*(MUNDO|COSTA RICA|TECNOLOGÍA)",
         answer,
         re.IGNORECASE,
     )

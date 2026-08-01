@@ -24,17 +24,17 @@ SOURCE_MAP: dict[str, str] = {
 }
 
 FEEDS: list[tuple[str, list[str]]] = [
-    ("GEOPOLÍTICA Y AMÉRICA LATINA", [
+    ("MUNDO", [
         "https://www.theguardian.com/world/rss",
         "https://www.theguardian.com/world/americas/rss",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
         "https://www.aljazeera.com/xml/rss/all.xml",
     ]),
-    ("POLÍTICA Y SOCIEDAD COSTARRICENSE", [
+    ("COSTA RICA", [
         "https://delfino.cr/feed",
         "https://semanariouniversidad.com/feed",
     ]),
-    ("TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE", [
+    ("TECNOLOGÍA", [
         "https://www.theguardian.com/technology/rss",
         "https://feeds.arstechnica.com/arstechnica/index",
     ]),

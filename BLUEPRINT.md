@@ -155,9 +155,9 @@ El pipeline recolecta titulares y sumarios de las siguientes fuentes RSS antes d
 
 | Sección | Fuentes RSS |
 |---------|-------------|
-| Geopolítica y América Latina | The Guardian (world + americas), BBC News, Al Jazeera |
-| Política y Sociedad Costarricense | Delfino.cr, Semanario Universidad |
-| Tecnología, Infraestructura y Software | The Guardian (technology), Ars Technica |
+| Mundo | The Guardian (world + americas), BBC News, Al Jazeera |
+| Costa Rica | Delfino.cr, Semanario Universidad |
+| Tecnología | The Guardian (technology), Ars Technica |
 
 Cada entrada incluye su fuente (`[The Guardian]`). El título de cada noticia se convierte en un hipervínculo al artículo original (`### [Título](url)`). El contexto RSS se inyecta antes del prompt con la instrucción de basarse únicamente en esos resultados.
 
@@ -197,7 +197,7 @@ Cada item RSS se evalúa con puntaje **1 a 5** y se reasigna a una sección. Res
 ```text
 PUNTAJE: [1-5]
 ACCIÓN: [APROBAR|RECHAZAR]
-SECCIÓN: [GEOPOLÍTICA Y AMÉRICA LATINA|POLÍTICA Y SOCIEDAD COSTARRICENSE|TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE]
+SECCIÓN: [MUNDO|COSTA RICA|TECNOLOGÍA]
 MOTIVO: [razón breve]
 ```
 
@@ -224,9 +224,9 @@ Tras la dedup, se seleccionan items por puntaje respetando cuotas por sección:
 
 | Sección | Cuota |
 |---------|-------|
-| GEOPOLÍTICA Y AMÉRICA LATINA | máx 6 |
-| POLÍTICA Y SOCIEDAD COSTARRICENSE | mín 3, máx 5 |
-| TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE | máx 5 |
+| MUNDO | máx 6 |
+| COSTA RICA | mín 3, máx 5 |
+| TECNOLOGÍA | máx 5 |
 | **Total** | **máx 15 items** (~10-12 min de audio) |
 
 Pase 1: se fuerza el mínimo de Costa Rica. Pase 2: se llenan los cupos restantes por puntaje global, respetando los máximos por sección.

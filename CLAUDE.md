@@ -31,7 +31,7 @@ config import ...`, not `from src.config import ...`), so run it from inside `sr
 The pipeline is a strict linear sequence, each stage in its own module, orchestrated by `main()` in
 [src/main.py](src/main.py):
 
-1. **`web_searcher.fetch_items()`** — polls 6 RSS feeds across 3 hardcoded sections (Geopolítica, Costa
+1. **`web_searcher.fetch_items()`** — polls 6 RSS feeds across 3 hardcoded sections (Mundo, Costa
    Rica, Tecnología), dedupes by title, caps at `MAX_PER_FEED=6` items/feed, and skips articles older
    than 48 hours (UTC). Returns `Item` dataclasses (section, title, source, url, summary, score, paragraph_md).
 2. **`relevance.filter_items()`** — one LLM call per item. The model scores 1-5, may RECHAZAR (reject),

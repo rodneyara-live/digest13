@@ -21,15 +21,15 @@ MP3_FILENAME = f"digest13.{DATE_STAMP}.mp3"
 HTML_FILENAME = f"digest13.{DATE_STAMP}.html"
 
 SECTION_ORDER = [
-    "GEOPOLÍTICA Y AMÉRICA LATINA",
-    "POLÍTICA Y SOCIEDAD COSTARRICENSE",
-    "TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE",
+    "MUNDO",
+    "COSTA RICA",
+    "TECNOLOGÍA",
 ]
 
 SECTION_QUOTAS: dict[str, dict] = {
-    "GEOPOLÍTICA Y AMÉRICA LATINA": {"max": 6},
-    "POLÍTICA Y SOCIEDAD COSTARRICENSE": {"min": 3, "max": 5},
-    "TECNOLOGÍA, INFRAESTRUCTURA Y SOFTWARE": {"max": 5},
+    "MUNDO": {"max": 6},
+    "COSTA RICA": {"min": 3, "max": 5},
+    "TECNOLOGÍA": {"max": 5},
 }
 MAX_TOTAL = 15
 TOKEN_LIMIT = 60_000
@@ -113,7 +113,7 @@ def select_by_quota(items: list) -> list:
     counts: dict[str, int] = defaultdict(int)
 
     # Pass 1: force minimum for Costa Rica (distinct stories)
-    cr_key = "POLÍTICA Y SOCIEDAD COSTARRICENSE"
+    cr_key = "COSTA RICA"
     cr_min = SECTION_QUOTAS.get(cr_key, {}).get("min", 0)
     for item in by_section.get(cr_key, []):
         if counts[cr_key] >= cr_min:

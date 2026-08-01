@@ -18,7 +18,7 @@
 ## Architecture (from BLUEPRINT.md)
 
 - Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → LLM dedup by event → quota-based selection (with a second, deterministic keyword-similarity dedup) → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
-- Selection quotas (`main.py`): Costa Rica min 3 / max 5, Geopolítica max 6, Tecnología max 5, total max 15 items (~10-12 min audio); `_is_duplicate()` skips candidates with ≥0.65 keyword-Jaccard similarity to an already-selected item
+- Selection quotas (`main.py`): Costa Rica min 3 / max 5, Mundo max 6, Tecnología max 5, total max 15 items (~10-12 min audio); `_is_duplicate()` skips candidates with ≥0.65 keyword-Jaccard similarity to an already-selected item
 - Editorial review uses a separate reasoning model (`EDITORIAL_MODEL`, default `openai/gpt-oss-120b`) — gives it a distinct daily quota
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
