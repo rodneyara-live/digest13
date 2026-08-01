@@ -114,16 +114,34 @@ EDITORIAL_MODEL="openai/gpt-oss-120b"
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
 
-# Configuración SMTP
-SMTP_SERVER="smtp-relay.brevo.com"
+# SMTP — Opción A: Gmail (recomendado para uso personal)
+# Requiere 2FA activado + Contraseña de Aplicación
+# Ver: https://myaccount.google.com/security/app-passwords
+# IMPORTANTE: la contraseña debe incluir los espacios tal como se muestran
+SMTP_SERVER="smtp.gmail.com"
 SMTP_PORT=587
-SMTP_USERNAME="tu_usuario_smtp"
-SMTP_PASSWORD="tu_password_smtp"
+SMTP_USERNAME="tu_correo@gmail.com"
+SMTP_PASSWORD="xxxx xxxx xxxx xxxx"
 
-# Remitente y Destinatario
-EMAIL_FROM="remitente@verified.com"
-EMAIL_TO="destino@correo.com"
+# SMTP — Opción B: Brevo (para mayor volumen o dominio verificado)
+# SMTP_SERVER="smtp-relay.brevo.com"
+# SMTP_PORT=587
+# SMTP_USERNAME="xxx@smtp-brevo.com"
+# SMTP_PASSWORD="xsmtpsib-..."
+
+EMAIL_FROM="tu_correo@gmail.com"
+EMAIL_TO="tu_correo@gmail.com"
 ```
+
+**Opción A vs Opción B:**
+
+| | Opción A (Gmail) | Opción B (Brevo) |
+|---|---|---|
+| **Ideal para** | Uso personal, 1-5 correos/día | Mayor volumen, dominio propio |
+| **Requisitos** | Cuenta Google + 2FA + Contraseña de Aplicación | Cuenta Brevo + dominio verificado |
+| **Deliverability** | Excelente (mismo FROM y SMTP) | Excelente (con DKIM/SPF configurado) |
+| **Costo** | Gratis | Gratis hasta 300 correos/día |
+| **Limitación** | 500 correos/día desde scripts | Requiere dominio propio para autenticación completa |
 
 ---
 

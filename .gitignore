@@ -6,3 +6,4 @@ __pycache__/
 *.html
 debug_news.txt
 logs/
+test_smtp.py
