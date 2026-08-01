@@ -75,7 +75,7 @@ logs/
 
 - LLM prompts (see BLUEPRINT.md) are exact — must be sent verbatim. They live in `relevance.py`, `paragraph_gen.py`, and `editorial_review.py`
 - Each news item title is a hyperlink to the original article (`### [Título](url)`) — Python guarantees exactly one bracket pair regardless of whether the model echoed brackets in its own output
-- Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis
+- Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis; colones (`₡2.300.500`) become `2300500 colones` (thousands dots removed, symbol → word after number)
 - Temp files (MP3, HTML) deleted after successful email send
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)
 - All news sections: independent, self-contained items; no connective phrases between stories
