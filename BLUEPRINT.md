@@ -60,14 +60,17 @@ flowchart TD
 * `trafilatura` (Extracción de texto limpio de artículos).
 
 * **Servicios Externos:**
-* API Key de Groq (Gratuito / Sin prepago necesario). Dos modelos con cuotas diarias **independientes**:
-  * `llama-3.3-70b-versatile` (no-reasoning) para las etapas de volumen (1 a 5) — **100K tokens/día**.
-  * `openai/gpt-oss-120b` (reasoning) solo para la revisión editorial final (etapa 6) — **200K tokens/día**.
-  Un run diario consume ~60-70K en total entre ambos.
-* **Fallback automático:** si un modelo agota su TPD (tokens per day), `call_llm()` cambia automáticamente al modelo de respaldo:
-  * Volume: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
-  * Reasoning: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` (200K TPD)
-  Configurable via `VOLUME_FALLBACK` y `REASONING_FALLBACK` en `.env`.
+* API Key de Groq (Gratuito / Sin prepago necesario). Tres modelos con cuotas diarias **independientes**, asignados por etapa según cuánto importa la calidad de esa etapa:
+  * `llama-3.1-8b-instant` (`FILTER_MODEL`, no-reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup) — **500K tokens/día**.
+  * `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) solo para redactar párrafos, etapa 5 — **100K tokens/día**.
+  * `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) solo para la revisión editorial final (etapa 6) — **200K tokens/día**.
+  Un run diario consume ~52K en total entre los tres. El reparto no es arbitrario: la etapa 1 hace una llamada por item (~44/día, ~34K tokens, el ~65% del gasto) y es la más barata conceptualmente — clasificar 1-5 contra una rúbrica explícita. Dejarla en el modelo de 100K consumía la mitad de esa cuota diaria en una sola corrida, así que cualquier prueba o reintento agotaba el 70B y degradaba justo la redacción. Con el reparto actual el 70B usa ~14K de sus 100K.
+* **Fallback automático:** si un modelo agota su TPD (tokens per day), `call_llm()` cambia automáticamente al modelo de respaldo y **recuerda el agotamiento por el resto de la corrida** (`_exhausted` en `llm.py`), en vez de reintentar el modelo muerto en cada llamada. La cadena es explícita en `FALLBACK_CHAIN`:
+  * `FILTER_MODEL` → `LLM_MODEL` (cae *hacia arriba*: sin modelo en la etapa 1 no se aprueba nada y la corrida aborta, así que gastar margen de párrafos es preferible a no publicar)
+  * `LLM_MODEL` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+  * `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
+  Configurable via `FILTER_MODEL`, `VOLUME_FALLBACK` y `REASONING_FALLBACK` en `.env`.
+* **No usar modelos de razonamiento en `FILTER_MODEL` ni `LLM_MODEL`.** Medido: una corrida con `gpt-oss-20b` como modelo de volumen gastó 1,173 tokens/llamada vs 832 de `llama-3.1-8b-instant` para el mismo trabajo (+41%), por la cadena de pensamiento oculta. Si alguna vez hiciera falta, el parámetro que realmente reduce esa generación es `reasoning_effort="low"` — `include_reasoning=False` solo la oculta de la respuesta.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -112,8 +115,9 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 ```ini
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
-LLM_MODEL="llama-3.3-70b-versatile"
-EDITORIAL_MODEL="openai/gpt-oss-120b"
+FILTER_MODEL="llama-3.1-8b-instant"      # etapas 1-2: clasificar (500K TPD)
+LLM_MODEL="llama-3.3-70b-versatile"      # etapa 5: redactar párrafos (100K TPD)
+EDITORIAL_MODEL="openai/gpt-oss-120b"    # etapa 6: revisión editorial (200K TPD)
 
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
@@ -163,6 +167,35 @@ Cada entrada incluye su fuente (`[The Guardian]`). El título de cada noticia se
 
 **Filtro de fecha:** solo se procesan artículos de las últimas 48 horas (UTC). Si una entrada no tiene fecha o es más vieja, se descarta automáticamente. Esto evita que noticias de días anteriores reaparezcan y consuman tokens innecesariamente.
 
+### Criterio de selección de fuentes
+
+**Esta lista es una decisión editorial deliberada, no el resultado de qué feeds estaban disponibles.** La sección de Costa Rica tiene solo dos fuentes a propósito. Cualquier propuesta de agregar fuentes —humana o de un agente— debe evaluarse primero contra este criterio y solo después por si su RSS y su extracción funcionan.
+
+**El criterio: excluir contenido diseñado para generar división, no para informar.** El patrón a evitar no es una posición política, es un formato: la nota recurrente que existe para insinuar en vez de reportar. En el contexto costarricense eso incluye tanto la pieza que vincula rutinariamente a un diputado del Frente Amplio con Cuba o Venezuela como su espejo, el comunicado sindical de agitación. Ninguno de los dos aporta un hecho verificable nuevo; ambos entregan indignación con formato de noticia.
+
+La razón por la que esto importa acá más que en otro boletín: Digest 13 se consume en privado, sin interacción en redes sociales y sin foro donde responder. Una noticia divisiva no genera debate ni contexto — solo deja el sedimento. El objetivo declarado del boletín es informar y edificar, así que el contenido que solo produce indignación no cumple ningún propósito, independientemente de a quién ataque.
+
+Esto explica dos decisiones que en el código parecen arbitrarias:
+- El criterio de rechazo `Noticias universitarias (logros estudiantiles, SINDEU, fedes, boletines)` en el prompt de `relevance.py` **no** es un filtro de ruido de prensa universitaria: es el filtro de contenido de agitación sindical aplicado sobre Semanario Universidad, cuya sección gremial es abundante.
+- Semanario Universidad se conserva por su trabajo de investigación, no por su línea gremial. Delfino.cr se conserva por ser independiente y de línea moderada, comparable a The Guardian.
+
+**Fuentes de Costa Rica ya evaluadas y descartadas** (revisadas el 2026-08-01 — no volver a proponerlas sin argumento nuevo):
+
+| Fuente | Estado técnico | Razón del descarte |
+|---|---|---|
+| La Nación | RSS OK, 100 entradas, extrae bien | Línea editorial alineada con la cúpula empresarial costarricense (valoración del dueño del proyecto). Además tiene paywall, que haría fallar descargas de forma intermitente |
+| El Observador | RSS OK, extrae bien | Línea editorial de derecha marcada (valoración del dueño del proyecto) |
+| Radio/Noticias Monumental | RSS OK pero débil: nota más reciente de 17h y solo ~684 chars extraídos | **Propiedad opaca:** Albavisión (Remigio Ángel González) → Grupo Repretel → Central de Radios → Monumental. El descarte es por esa estructura; la debilidad del feed solo lo confirma |
+| AmeliaRueda.com | **Sin RSS** — 404 en todas las rutas estándar | Doble descarte: no hay forma de consumirla con esta arquitectura, y la estructura de propiedad es la misma de Repretel (ver nota abajo). Decisión cerrada, no pendiente |
+| CRHoy / «Costa Rica Hoy» (crhoy.com) | Feed inválido — **irrelevante para la decisión** | Descarte editorial, no técnico: no cumple el estándar periodístico del boletín. Si algún día su RSS funciona, **no** es motivo para reconsiderarla |
+| La República | Feed inválido | Técnico — no evaluada editorialmente |
+
+**Nota sobre concentración de propiedad**, que es el argumento estructural y verificable detrás de la cautela con el grupo Repretel: Albavisión administra ~25 canales de TV y ~68 radios en América Latina, y en Costa Rica controla cuatro canales y once radios vía Central de Radios. Reporteros Sin Fronteras señala explícitamente en su informe 2026 que en Costa Rica «la concentración de la propiedad de medios en pocos conglomerados limita el pluralismo», con el país en caída sostenida desde 2022 (puesto 38 de 180). Existe literatura académica específica sobre el caso (*Concentración y transnacionalización de medios en Costa Rica: Caso Albavisión*; *De pocas a menos manos: la concentración de medios en Costa Rica 1990-2017*). Lo documentado es el riesgo estructural al pluralismo — no un análisis de contenido que pruebe sesgo nota por nota.
+
+**Sobre AmeliaRueda.com, para el registro:** el caso se investigó a fondo porque parecía tener argumentos a favor, y conviene dejar por qué no alcanzaron. En contra: Amelia Rueda es directora de información de Central de Radios —cargo ejecutivo *dentro* del grupo Repretel— y conduce *Nuestra Voz* en Radio Monumental, así que el sitio no es independiente de Repretel en términos estructurales. A favor: su unidad de datos, DataBaseAR, fue **uno de los dos únicos medios costarricenses** en el consorcio ICIJ de los Panama Papers; el otro fue Semanario Universidad, que este proyecto sí usa. Credenciales de investigación equivalentes, dentro de la estructura de propiedad que el criterio rechaza. **Resolución: queda fuera** — sin RSS no hay forma de consumirla, y con la misma propiedad de Repretel el matiz investigativo (de 2016) no compensa. No reabrir sin argumento nuevo.
+
+**Estado de la sección Costa Rica: cerrada en dos fuentes** (Delfino.cr y Semanario Universidad). El universo de medios costarricenses con RSS utilizable y línea editorial aceptable está agotado, no sub-explorado. Si la sección repite ángulos del mismo evento en un día de noticia local dominante, la palanca es el mínimo de la cuota (`SECTION_QUOTAS["COSTA RICA"]["min"]`), **no** agregar fuentes.
+
 ---
 
 ## 🗣️ Limpieza de Texto para TTS
@@ -181,14 +214,17 @@ Esto evita que el TTS lea en voz alta símbolos de formato.
 
 ## 🎯 Pipeline de Curación (LLM + Cuotas)
 
-El pipeline usa dos modelos de Groq, cada uno con su propia cuota diaria, para no competir por el mismo presupuesto de tokens:
+El pipeline usa tres modelos de Groq, cada uno con su propia cuota diaria, para no competir por el mismo presupuesto de tokens:
 
 | Modelo | Uso | Etapas | `max_tokens` |
 |--------|-----|--------|--------------|
-| `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) | Volumen: filtrar, agrupar, redactar | 1 (relevancia), 2 (dedup), 5 (párrafo) | 600 / 600 / 800 |
-| `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 1500 |
+| `llama-3.1-8b-instant` (`FILTER_MODEL`, no-reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
+| `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
+| `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 8000 |
 
-`call_llm` en `llm.py` acepta `model` por llamada (default `LLM_MODEL`); `editorial_review.py` pasa explícitamente `model=EDITORIAL_MODEL`. Como `gpt-oss-120b` es un modelo *reasoning* que gasta tokens en cadena de pensamiento oculta antes de responder, su `max_tokens` debe ser generoso o la respuesta llega vacía o truncada — `llm.py` loguea `⚠ TRUNCADO` cuando `finish_reason == "length"` para detectar esto sin adivinar. `llama-3.3-70b-versatile` no tiene ese costo oculto, pero se le dejan los mismos límites generosos por margen, no por necesidad. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles.
+`call_llm` en `llm.py` acepta `model` por llamada (default `LLM_MODEL`); `relevance.py` pasa explícitamente `model=FILTER_MODEL` y `editorial_review.py` pasa `model=EDITORIAL_MODEL`, así que solo `paragraph_gen.py` usa el default. Como `gpt-oss-120b` es un modelo *reasoning* que gasta tokens en cadena de pensamiento oculta antes de responder, su `max_tokens` debe ser generoso o la respuesta llega vacía o truncada — `llm.py` loguea `⚠ TRUNCADO` cuando `finish_reason == "length"` para detectar esto sin adivinar. Los modelos no-reasoning no tienen ese costo oculto, pero se les dejan los mismos límites generosos por margen, no por necesidad. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles y se recuerda por el resto de la corrida.
+
+El respaldo de cada modelo se resuelve con un dict explícito (`FALLBACK_CHAIN`), no infiriéndolo de la forma del argumento `model`: con tres primarios ya no hay manera confiable de adivinar a qué cuota pertenece quien llama.
 
 ### Etapa 1 — Filtro de relevancia (`relevance.py`)
 
@@ -252,13 +288,15 @@ El LLM genera solo título y párrafo — nunca escribe la URL. En Python, una r
 
 ### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
-El informe completo (máx 8000 caracteres) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) como **última línea de defensa de calidad**. El editor verifica:
+El informe completo (`MAX_REVIEW_CHARS = 24000`, holgado sobre los ~12.5K que ocupa un digest de 15 noticias) se envía al modelo `EDITORIAL_MODEL` (por defecto `openai/gpt-oss-120b`, un modelo de razonamiento con cuota diaria propia) como **última línea de defensa de calidad**. El editor verifica:
 
 - **RECHAZA** si detecta: formato roto (JSON, XML, thinking visible, viñetas), párrafos vacíos, contenido de farándula/basura, datos inventados, o más de 2 noticias del mismo evento
 - **CORRIGE** si detecta: estructura incorrecta, frases vagas prohibidas, párrafos demasiado largos/cortos, noticias repetidas que deben fusionarse
 - **APROBA** solo si el digest es apto para publicación
 
-Si el editor responde `RECHAZADO`, `main.py` aborta el envío de correo y escribe el fallo en el log. `max_tokens=1500`, temperatura 0.2.
+Si el editor responde `RECHAZADO`, `main.py` aborta el envío de correo y escribe el fallo en el log. `max_tokens=8000`, temperatura 0.2.
+
+**El límite de entrada no es cosmético.** Con el tope anterior de 8000 caracteres el editor solo veía los primeros dos tercios del informe —la sección TECNOLOGÍA nunca se revisaba— y el corte caía a mitad de una URL, así que reportaba defectos inexistentes (un enlace partido parece roto; la noticia partida parece un título sin párrafo) y rechazaba informes que, viéndolos completos, aprueba. `_fit()` recorta solo en frontera de noticia (`\n### `) y avisa por consola cuando recorta. El veredicto de ambos lados (`APROBADO`/`RECHAZADO`) se compara con `_verdict()`, que quita markdown inicial: el modelo responde `**RECHAZADO:**` o `### APROBADO` de forma rutinaria, y un `startswith` pelado deja el gate **abierto**.
 
 ---
 

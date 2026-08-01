@@ -16,10 +16,15 @@ suene a "ahorrar tokens" debe pesarse contra esto: aquí se prefiere gastar de m
 
 ### Prioridad 1 — Resiliencia: proveedor LLM de respaldo cuando se agote el presupuesto de Groq
 
-**Nota:** esto es distinto del split de dos modelos de Groq (`llama-3.3-70b-versatile` +
-`openai/gpt-oss-120b`) ya implementado — ese reparte la carga entre dos cuotas *dentro* de Groq. Este
-ítem es para cuando **ambas** cuotas de Groq se agoten el mismo día y se necesite un proveedor externo
-distinto (p. ej. Gemini) como respaldo total.
+**Nota:** esto es distinto del split de tres modelos de Groq (`llama-3.1-8b-instant` +
+`llama-3.3-70b-versatile` + `openai/gpt-oss-120b`) ya implementado — ese reparte la carga entre cuotas
+*dentro* de Groq. Este ítem es para cuando **todas** las cuotas de Groq se agoten el mismo día y se
+necesite un proveedor externo distinto (p. ej. Gemini) como respaldo total.
+
+**Prioridad revisada a la baja:** con el routing por etapa (relevancia/dedup en la cuota de 500K,
+párrafos en la de 100K usando solo ~14K), agotar las tres cuotas el mismo día pasó a requerir un orden
+de magnitud más de corridas que antes. Sigue siendo la resiliencia correcta a largo plazo, pero ya no
+es una restricción que se toque en operación normal.
 
 Groq da 100K-200K tokens/día gratis por modelo, pero en fases de prueba intensiva ambos presupuestos se
 pueden agotar el mismo día y el pipeline queda sin poder correr. `call_llm()` en
@@ -31,6 +36,67 @@ ni `paragraph_gen.py`, ni `editorial_review.py` conocen el proveedor detrás, so
 el cambio queda contenido en `llm.py`: detectar agotamiento del proveedor primario (429 tras agotar
 reintentos) y caer a un segundo cliente con la misma firma, o decidir el proveedor por variable de
 entorno. No requiere tocar los módulos de prompts.
+
+### Prioridad 2 — Eficiencia: agrupar el filtro de relevancia en lotes
+
+**Diferido a propósito, no pendiente por olvido.** Hoy funciona bien item por item y una corrida limpia
+cabe cómodamente en las cuotas; no se toca lo que no está roto. Esta entrada existe para que la decisión
+se pueda re-evaluar con los números a mano en vez de re-investigarla.
+
+**Situación:** `filter_items()` en [relevance.py](src/relevance.py:63) hace **una llamada LLM por item**
+(~44/día) y reenvía la lista completa de criterios de rechazo en cada una. Medido: ~34K tokens, el ~65%
+del gasto total de la corrida (~52K). Agrupar en lotes de 10 lo bajaría a ~5 llamadas y ~14K tokens —
+suficiente para que *todo* el pipeline de volumen (relevancia + dedup + párrafos) quepa en la cuota de
+100K de `llama-3.3-70b-versatile` con ~3x de margen, es decir: el ahorro no es para gastar menos, es lo
+que haría *asequible* usar el modelo bueno también para clasificar.
+
+**Contras que motivaron el diferimiento:**
+- Implica reescribir el prompt de relevancia, que `BLUEPRINT.md` marca como verbatim/afinado (habría que
+  actualizar BLUEPRINT.md, CLAUDE.md y AGENTS.md junto con el cambio).
+- Duda razonable sobre si un modelo de 8B mantiene el criterio de forma consistente a lo largo de un lote
+  grande, cuando hoy item por item lo hace bien.
+- Un lote malo cuesta 10 noticias en vez de 1.
+
+**Si se evalúa:** numerar los items con ID y parsear por ID, con **reintento individual** de los IDs que
+el modelo omita — así un lote incompleto degrada a llamadas sueltas en vez de perder el lote. Conservar
+la distinción `MALFORMADO` vs `RECHAZADO` que ya existe ([relevance.py:86](src/relevance.py:86)), que es
+justo la salvaguarda que detectaría un lote mal formado. Un tamaño de lote de 5 es la variante
+conservadora (~9 llamadas, ~20K tokens).
+
+### ~~Calibración: etapa 1 y etapa 6 no coinciden en qué es "tema válido"~~ (resuelto — era el recorte)
+
+**Diagnóstico inicial equivocado, se documenta para no repetirlo.** Al arreglar el gate editorial (que
+fallaba abierto por markdown en el veredicto) apareció lo que parecía un desacuerdo de criterio entre
+etapas: en la corrida del 2026-08-01 12:48 el editor rechazó el digest completo alegando noticias fuera
+de "geopolítica/CR/tech", contenido que la etapa 1 había aprobado como MUNDO. La conclusión tentativa fue
+degradar ese criterio de RECHAZO a CORRECCIÓN.
+
+**Era un síntoma.** La causa real: `review()` recortaba el informe a 8000 caracteres y un digest de 15
+noticias ocupa ~12.5K, así que el editor juzgaba solo los primeros dos tercios — donde estaban justo las
+dos noticias discutibles. La proporción de contenido fuera de tema le parecía 2 de 9 en vez de 2 de 14, y
+además el corte caía a mitad de una URL, lo que le hacía reportar defectos inexistentes. Con
+`MAX_REVIEW_CHARS = 24000` y recorte en frontera de noticia, el mismo digest se **aprueba** (verificado dos
+veces seguidas sobre el texto exacto que se había enviado).
+
+**Lección para el futuro:** antes de aflojar un criterio del prompt editorial, verificar qué porción del
+informe está viendo realmente el modelo. Degradar el criterio habría debilitado el gate de forma permanente
+para tapar un bug de truncamiento.
+
+### Prioridad 3 — Calidad: caché entre corridas (SQLite, 3-7 días)
+
+**Diferido junto con el anterior**, pero es sobre todo una mejora de *calidad*, no de gasto.
+
+**Situación:** el pipeline no tiene estado entre corridas. Con `MAX_AGE_HOURS = 48` en
+[web_searcher.py](src/web_searcher.py:44) y ejecución diaria, los items de ayer se vuelven a evaluar hoy
+—se re-paga la llamada de relevancia por algo ya juzgado— y, más importante, **nada impide que la misma
+noticia salga en el digest dos días seguidos**. El riesgo se concentra en COSTA RICA: solo 2 feeds,
+Semanario Universidad es un semanario (sus items persisten días en el feed) y `select_by_quota()` fuerza
+un `min: 3` para esa sección, así que si hay poco material nuevo el relleno viene de lo ya publicado.
+
+**Acción:** SQLite en `.cache/` (ya está en `.gitignore`), `url → (puntaje, sección, fecha, ya_publicado)`
+con TTL de 3 a 7 días. Dos usos: excluir de la selección lo ya publicado, y reutilizar el puntaje en vez
+de volver a preguntar. Se puede implementar solo la primera mitad (excluir repetidos) si se prefiere no
+cachear juicios del LLM que podrían quedar obsoletos al cambiar los prompts.
 
 ---
 

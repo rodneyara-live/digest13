@@ -31,9 +31,14 @@ config import ...`, not `from src.config import ...`), so run it from inside `sr
 The pipeline is a strict linear sequence, each stage in its own module, orchestrated by `main()` in
 [src/main.py](src/main.py):
 
-1. **`web_searcher.fetch_items()`** — polls 6 RSS feeds across 3 hardcoded sections (Mundo, Costa
+1. **`web_searcher.fetch_items()`** — polls 8 RSS feed URLs across 3 hardcoded sections (Mundo, Costa
    Rica, Tecnología), dedupes by title, caps at `MAX_PER_FEED=6` items/feed, and skips articles older
    than 48 hours (UTC). Returns `Item` dataclasses (section, title, source, url, summary, score, paragraph_md).
+   Feeds are parsed concurrently (`FEED_WORKERS=8`), but `_parse_feed()` returns *every* eligible entry
+   and the merge loop re-applies dedup and `MAX_PER_FEED` walking `FEEDS` in declared order — so when two
+   feeds carry the same story the winner stays the one listed first, and the per-feed cap still counts only
+   items that survive dedup. Don't move either back into the worker; that would make output depend on
+   which thread finished first.
 2. **`relevance.filter_items()`** — one LLM call per item. The model scores 1-5, may RECHAZAR (reject),
    and may reassign the item's section. Items scoring <2 or marked RECHAZAR are dropped. The rejection
    criteria list (sports, pseudoscience, anti-vax, university PR, etc.) lives in the prompt itself —
@@ -55,18 +60,34 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
    headers, `Accept-Encoding: gzip, deflate, br`) and extracts text with `trafilatura`, decompressing the
    response with `_decompress()` (gzip/zlib/brotli, falls back to raw bytes) before decoding. Semanario
    Universidad's server returns compressed bytes that `requests` won't auto-decompress on its own, so
-   don't remove this even if it looks redundant.
+   don't remove this even if it looks redundant. `main.fetch_all_articles()` runs all 15 downloads
+   concurrently (`ARTICLE_WORKERS=5`) into a `{url: text}` dict *before* the paragraph loop — at a 20s
+   timeout each this is the run's slowest stretch and it costs no tokens. The paragraph loop stays serial
+   on purpose: concurrent LLM calls pressure the free tier's RPM limit for no gain.
 6. **`paragraph_gen.generate_paragraph()`** — one LLM call per article, producing a `### Title` +
    HECHO/CONTEXTO/IMPLICACIÓN paragraph. The model only writes the title text; a regex
    (`^###\s*\[?(.+?)\]?\s*$`) then injects the real `Item.url` into it as `### [título](url)`, tolerating
    whether the model wrapped its own title in brackets or not — this guarantees exactly one bracket pair
    and a real URL regardless of what the model did. Input truncated to 2500 chars, `max_tokens=800`.
    Banned phrases ("es importante", "genera debate", etc.) are enforced by the prompt.
-7. **`editorial_review.review()`** — strict quality gate (single LLM call, max 8000 chars,
-   `max_tokens=1500`, uses `EDITORIAL_MODEL`). Rejects the entire digest if it detects broken format
+7. **`editorial_review.review()`** — strict quality gate (single LLM call, `MAX_REVIEW_CHARS=24000`,
+   `max_tokens=8000`, uses `EDITORIAL_MODEL`). The input cap must stay comfortably above a full digest
+   (~12.5K chars for 15 items) and any trim must land on an item boundary via `_fit()`: an earlier
+   8000-character *input* cap hid the last third of the report — the whole TECNOLOGÍA section — from the
+   "last line of defense", and cut mid-URL, so the editor reported phantom defects (a sliced link reads as
+   broken, the straddled item as a title with no paragraph) and rejected a digest that it approves in full.
+   `max_tokens` is separately generous because the reasoning model spends ~4.3K tokens per call on the full
+   digest and returned *empty* at 2000. Rejects the entire digest if it detects broken format
    (JSON, thinking text, bullet lists), empty paragraphs, celebrity gossip, fabricated data, or >2
    stories on the same event. On RECHAZADO, `main.py` aborts the email send and logs the failure.
-   Returns `None` on APROBADO, otherwise a correction list.
+   Returns `None` on APROBADO, otherwise a correction list. **Both verdicts must be matched through
+   `_verdict()`**, which strips leading markdown/whitespace before comparing — the model routinely answers
+   `**RECHAZADO:**` or `### APROBADO`, and a bare `startswith("RECHAZADO")` misses that and makes the gate
+   fail *open*, mailing a digest the editor rejected (observed in the 2026-08-01 12:48 run). `main.py` must
+   use `is_rejection()` rather than re-implementing the check. A third state matters: `is_gate_failure()` is
+   true when the review call itself produced nothing (truncated or failed). That is not an approval — the
+   digest ships unreviewed — so `main()` appends "SIN revisión editorial" to the run-log status rather than
+   recording a clean OK.
 8. **`html_generator.build_html()`** / **`text_cleaner.strip_markdown()`** / **`tts_engine.synthesize()`**
    — build the final HTML (audio embedded via `cid:audio_resumen_mp3`, not a URL) and the MP3 (via
    `edge-tts`, default voice `es-CR-MariaNeural`) in parallel-ish sequence; TTS runs on markdown stripped
@@ -78,30 +99,66 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
 
 `call_llm(system_prompt, user_prompt, max_tokens, temperature, model=None)` wraps a module-level Groq
 client (`_get_client()`, built once and reused). `model` defaults to `LLM_MODEL` if not passed explicitly.
-**Two models, two independent daily quotas** — see `BLUEPRINT.md`'s "Pipeline de Curación" table for the
-authoritative per-stage breakdown:
+**Three models, three independent daily quotas**, assigned per stage by how much that stage's quality
+matters — see `BLUEPRINT.md`'s "Pipeline de Curación" table for the authoritative per-stage breakdown:
 
-- `LLM_MODEL` (default `llama-3.3-70b-versatile`, non-reasoning, 100K tokens/day) — used implicitly by
-  `relevance.py` (stages 1-2) and `paragraph_gen.py` (stage 5).
+- `FILTER_MODEL` (default `llama-3.1-8b-instant`, non-reasoning, 500K tokens/day) — passed explicitly via
+  `model=FILTER_MODEL` in `relevance.py` (stages 1-2). This is the highest-volume stage by far (one call
+  per RSS item, ~44/day, ~65% of the run's tokens) and the cheapest judgment: scoring 1-5 against an
+  explicit rubric. It lives on the 500K quota precisely so it can't cannibalize the paragraph budget.
+- `LLM_MODEL` (default `llama-3.3-70b-versatile`, non-reasoning, 100K tokens/day) — the `call_llm` default,
+  so only `paragraph_gen.py` (stage 5) uses it implicitly. Paragraph writing is what determines whether the
+  digest reads well, so it gets the strongest model with ~7x headroom (~14K of 100K per run).
 - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, 200K tokens/day) — passed explicitly via
   `model=EDITORIAL_MODEL` only in `editorial_review.py` (stage 6).
+
+**Never set a reasoning model as `FILTER_MODEL`/`LLM_MODEL`.** Measured: a run with `gpt-oss-20b` as the
+volume model spent 1,173 tokens/call vs 832 for `llama-3.1-8b-instant` on identical work (+41%), all of it
+hidden chain-of-thought. If it's ever unavoidable, `reasoning_effort="low"` is the parameter that actually
+suppresses that generation — `include_reasoning=False` only hides it from the response.
 
 `EDITORIAL_MODEL` burns tokens on hidden chain-of-thought before emitting its answer, so its `max_tokens`
 must stay generous or the response comes back empty/truncated — `llm.py` logs `⚠ TRUNCADO` when
 `response.choices[0].finish_reason == "length"`, which is the reliable signal to recalibrate a limit
 instead of guessing from output length. Current values: relevance=600, dedup=600, paragraph=800,
-editorial review=1500. `LLM_MODEL` doesn't carry the same hidden-reasoning cost but keeps the same
+editorial review=8000. `LLM_MODEL` doesn't carry the same hidden-reasoning cost but keeps the same
 generous caps anyway — headroom is cheap since `max_tokens` only bounds spend, it doesn't pre-allocate it.
 
 Retries 3x on 429 with linear backoff (30s, 60s, 90s), except when the error text contains "tokens per
-day" (TPD quota exhausted) — that triggers automatic fallback to a backup model:
-- Volume: `llama-3.3-70b-versatile` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
-- Reasoning: `openai/gpt-oss-120b` → `openai/gpt-oss-20b` (200K TPD)
+day" (TPD quota exhausted) — that triggers automatic fallback to a backup model. Which backup is a lookup
+in `FALLBACK_CHAIN`, an explicit `{primary: backup}` dict built from config; with three primaries there's
+no reliable way to infer the caller's quota from the shape of the `model` argument, which is what the
+previous if-chain did. Self-mappings are filtered out, since `FILTER_MODEL` defaults to `VOLUME_FALLBACK`.
+- `FILTER_MODEL` → `LLM_MODEL` — falls *up* on purpose: with no stage-1 model nothing gets approved and
+  `main()` aborts, so spending paragraph headroom beats shipping nothing. This makes the volume chain a
+  cycle (8b → 70b → 8b); `_first_available()`'s `seen` set is what terminates it.
+- `LLM_MODEL` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+- `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
 
-If both models in a chain are exhausted, the call returns `None`. One full run uses
-~60-70K combined across both models. Token usage is tracked per-model via `response.usage.total_tokens`
-(exposed by Groq), accumulated in `llm.py`'s `_token_usage` dict, and written to `logs/digest13.log`
-after each run by `main.py`'s `_write_run_log()` function.
+Exhaustion is remembered for the rest of the process in `llm.py`'s `_exhausted` set, and announced once
+rather than once per call — otherwise a degraded run wastes a round-trip per call rediscovering that the
+primary is dead. When every model in a chain is exhausted, the call returns `None`.
+
+There is deliberately **no local token budget**. An earlier `TOKEN_LIMIT`/`approx_tokens` gate in `main.py`
+estimated spend as `chars // 4` starting from zero inside the paragraph loop, so it never counted the ~34K
+already spent on relevance and never actually fired; a single global ceiling also doesn't correspond to
+three independent per-model quotas. The TPD fallback chain handles real exhaustion, so don't reintroduce an
+estimated gate — it can only skip news over a fictional number.
+
+One full run uses ~52K combined across the three models (~34K relevance, ~14K paragraphs, ~1.5K dedup,
+~3.5K editorial). Token usage is tracked per-model via `response.usage.total_tokens` (exposed by Groq),
+accumulated in `llm.py`'s `_token_usage` dict, and written to `logs/digest13.log` after each run by
+`main.py`'s `_write_run_log()` function — that log is the authoritative record of which model did what.
+
+### Source selection is editorial, not technical
+
+The `FEEDS` list in `web_searcher.py` is a deliberate editorial decision — **read BLUEPRINT.md's "Criterio
+de selección de fuentes" before proposing any new source.** Costa Rica having only two feeds is intentional,
+not a gap to fill: La Nación, El Observador, Monumental and others were evaluated and rejected on editorial
+grounds despite working fine technically. The criterion excludes content engineered to generate division
+rather than inform, in both political directions — which is also what the `SINDEU`/`fedes` rejection line in
+`relevance.py`'s prompt actually implements (it filters union agitation content out of Semanario Universidad,
+it is not a university-PR noise filter). Evaluate editorial line first, RSS/extraction second.
 
 ### Config and caching (`config.py`)
 
