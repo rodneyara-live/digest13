@@ -90,9 +90,9 @@ generous caps anyway — headroom is cheap since `max_tokens` only bounds spend,
 
 Retries 3x on 429 with linear backoff (30s, 60s, 90s), except when the error text contains "tokens per
 day" (TPD quota exhausted) — that fails immediately without wasting a retry cycle. One full run uses
-~60-70K combined across both models, and `main.py` tracks an approximate running token count
-(`TOKEN_LIMIT=60_000`, estimated as `len(text)//4`, not the real `response.usage`) to skip remaining
-articles/the review pass if the budget looks exhausted mid-run.
+~60-70K combined across both models. Token usage is tracked per-model via `response.usage.total_tokens`
+(exposed by Groq), accumulated in `llm.py`'s `_token_usage` dict, and written to `logs/digest13.log`
+after each run by `main.py`'s `_write_run_log()` function.
 
 ### Config and caching (`config.py`)
 

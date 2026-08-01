@@ -2,9 +2,9 @@ import asyncio
 import re
 import sys
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
-from config import PROJECT_ROOT
+from config import PROJECT_ROOT, EMAIL_TO
 from web_searcher import fetch_items
 from relevance import filter_items, deduplicate_by_event
 from article_fetcher import fetch_full_text
@@ -14,6 +14,7 @@ from html_generator import build_html
 from text_cleaner import strip_markdown
 from tts_engine import synthesize
 from email_sender import send
+from llm import get_token_usage
 
 DATE_STAMP = date.today().strftime("%Y.%m.%d")
 MP3_FILENAME = f"digest13.{DATE_STAMP}.mp3"
@@ -32,6 +33,29 @@ SECTION_QUOTAS: dict[str, dict] = {
 }
 MAX_TOTAL = 15
 TOKEN_LIMIT = 60_000
+
+LOG_DIR = PROJECT_ROOT / "logs"
+RUN_LOG = LOG_DIR / "digest13.log"
+
+
+def _write_run_log(status: str, stats: dict) -> None:
+    LOG_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [f"=== {timestamp} ==="]
+    lines.append(f"Items RSS: {stats.get('rss', 0)} | Aprobados: {stats.get('approved', 0)} | Seleccionados: {stats.get('selected', 0)}")
+    lines.append(f"Artículos descargados: {stats.get('downloaded', 0)} | Párrafos generados: {stats.get('paragraphs', 0)}")
+    token_usage = get_token_usage()
+    if token_usage:
+        lines.append("Tokens:")
+        total_tokens = 0
+        for model, data in token_usage.items():
+            lines.append(f"  {model}: {data['total']:,} tokens ({data['calls']} llamadas)")
+            total_tokens += data["total"]
+        lines.append(f"  Total: {total_tokens:,} tokens")
+    lines.append(f"Estado: {status}")
+    lines.append("")
+    with open(RUN_LOG, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 def _section_rank(section: str) -> int:
@@ -134,16 +158,21 @@ def assemble(items: list) -> str:
 
 
 def main() -> None:
+    stats = {"rss": 0, "approved": 0, "selected": 0, "downloaded": 0, "paragraphs": 0}
+
     print("Leyendo feeds RSS...")
     items = fetch_items()
+    stats["rss"] = len(items)
     print(f"  {len(items)} items obtenidos")
 
     print("Filtrando por relevancia...")
     approved = filter_items(items)
+    stats["approved"] = len(approved)
     print(f"  {len(approved)} items aprobados")
 
     if not approved:
         print("ERROR: Ningún item superó el filtro de relevancia")
+        _write_run_log("FALLO — Ningún item superó el filtro de relevancia", stats)
         sys.exit(1)
 
     print("Deduplicando por evento...")
@@ -152,6 +181,7 @@ def main() -> None:
 
     print(f"Seleccionando por puntaje y cuotas...")
     selected = select_by_quota(approved)
+    stats["selected"] = len(selected)
     print(f"  {len(selected)} items seleccionados:")
     for it in selected:
         print(f"    [{it.score}] {it.section[:30]:30s} {it.title[:80]}")
@@ -172,17 +202,20 @@ def main() -> None:
             print(f"    → no se pudo descargar el artículo")
             continue
 
+        stats["downloaded"] += 1
         paragraph = generate_paragraph(item, full_text)
         if not paragraph:
             print(f"    → no se pudo generar párrafo")
             continue
 
+        stats["paragraphs"] += 1
         approx_tokens += (len(full_text[:2500]) + len(paragraph)) // 4
         item.paragraph_md = paragraph
         paragraphs.append(item)
 
     if not paragraphs:
         print("ERROR: No se generaron noticias")
+        _write_run_log("FALLO — No se generaron noticias", stats)
         sys.exit(1)
 
     news_text = assemble(paragraphs)
@@ -216,6 +249,7 @@ def main() -> None:
     mp3_path.unlink(missing_ok=True)
     html_path.unlink(missing_ok=True)
 
+    _write_run_log(f"OK — correo enviado a {EMAIL_TO}", stats)
     print("¡Listo! Digest 13 entregado.")
 
 

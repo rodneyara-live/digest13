@@ -32,22 +32,6 @@ el cambio queda contenido en `llm.py`: detectar agotamiento del proveedor primar
 reintentos) y caer a un segundo cliente con la misma firma, o decidir el proveedor por variable de
 entorno. No requiere tocar los módulos de prompts.
 
-### Prioridad 2 (la más baja) — Eficiencia: conteo real de tokens en vez de estimación
-
-`main.py:114-148` estima tokens con `len(texto) // 4` y **no cuenta los tokens de la etapa de
-relevancia** (un LLM call por cada item de RSS crudo, antes de que `approx_tokens` empiece a acumularse).
-La estimación real de consumo puede ser mayor que la visible en el texto de entrada/salida.
-
-**Nota de prioridad:** esto era relevante cuando se pensaba ajustar `TOKEN_LIMIT` con precisión para no
-desperdiciar cuota. Dado que la cuota de Groq no es una preocupación para este proyecto (ver contexto
-arriba), esto baja a "nice to have" — solo vale la pena si en algún momento se quiere *diagnóstico* de
-consumo, no para restringir nada.
-
-**Acción, si se retoma:**
-- `call_llm()` en [llm.py](src/llm.py) puede devolver también `response.usage.total_tokens` (Groq lo
-  expone) en vez de que cada módulo estime con `len()//4`.
-- Acumular ese total real en `main.py`, incluyendo la etapa de `filter_items()`, no solo la de párrafos.
-
 ---
 
 ## Items cerrados
@@ -185,6 +169,15 @@ de implementar.
   produciendo el formato esperado (`PUNTAJE:`/`ACCIÓN:`/`SECCIÓN:`/`MOTIVO:` en relevancia, título+párrafo
   en la generación) — al ser un modelo distinto al que se usó para afinar esos prompts, conviene revisar
   la primera corrida real con atención antes de asumir que el comportamiento es idéntico.
+
+### ~~Eficiencia: conteo real de tokens en vez de estimación~~
+
+**Cerrado en:** commit `pendiente` (2026-07-31)
+
+**Evidencia:**
+- `src/llm.py` — `get_token_usage()` expone `response.usage.total_tokens` de Groq en cada llamada.
+- `src/main.py` — `_write_run_log()` escribe resumen a `logs/digest13.log` con tokens reales por modelo.
+- La estimación con `len()//4` fue eliminada; ahora se usa el conteo real de la API.
 
 ---
 

@@ -21,6 +21,8 @@
 - Failure alerting: `OnFailure=digest13-notify.service` triggers `on-failure.sh` which logs to `logs/failures.log`
 - `main.py` exits with `sys.exit(1)` on critical failures (empty filter, no paragraphs generated)
 - Error logging: `article_fetcher.py` and `web_searcher.py` log exception type and message on failures
+- Token logging: `llm.py` tracks tokens per model; `main.py` writes summary to `logs/digest13.log` after each run
+- Run log: `logs/digest13.log` accumulates a summary of each execution (items, tokens, status) — gitignored
 - Local cache isolation: redirect all cache/temp dirs under `.cache/` (set `HF_HOME`, `XDG_CACHE_HOME`, `TORCH_HOME` at module init)
 - GPU path (future): detect `cuda`, use `float16` or INT4 quantization for 4GB VRAM (NVIDIA Quadro T2000)
 

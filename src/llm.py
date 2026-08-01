@@ -7,6 +7,7 @@ MAX_RETRIES = 3
 RETRY_BASE_DELAY = 30.0
 
 _client = None
+_token_usage: dict[str, dict] = {}
 
 
 def _get_client():
@@ -14,6 +15,10 @@ def _get_client():
     if _client is None:
         _client = Groq(api_key=GROQ_API_KEY)
     return _client
+
+
+def get_token_usage() -> dict[str, dict]:
+    return _token_usage.copy()
 
 
 def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
@@ -37,6 +42,14 @@ def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 200,
             finish = response.choices[0].finish_reason
             if finish == "length":
                 print(f"  ⚠ TRUNCADO: finish_reason=length (max_tokens={max_tokens})")
+            usage = response.usage
+            model_name = model or LLM_MODEL
+            if model_name not in _token_usage:
+                _token_usage[model_name] = {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
+            _token_usage[model_name]["prompt"] += usage.prompt_tokens
+            _token_usage[model_name]["completion"] += usage.completion_tokens
+            _token_usage[model_name]["total"] += usage.total_tokens
+            _token_usage[model_name]["calls"] += 1
             return response.choices[0].message.content.strip()
         except Exception as e:
             error = str(e)

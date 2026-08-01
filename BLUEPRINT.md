@@ -407,6 +407,12 @@ cat logs/failures.log
 ### Monitoreo
 
 ```bash
+# Ver log de corridas (resumen de cada ejecución)
+cat logs/digest13.log
+
+# Ver últimas 5 corridas
+tail -30 logs/digest13.log
+
 # Ver logs del pipeline (últimas 24 horas)
 journalctl --user -u digest13.service --since today
 
@@ -416,6 +422,21 @@ journalctl --user -u digest13.service --since today -p err
 # Ver log de fallos del script
 cat logs/failures.log
 ```
+
+**Formato del log de corridas** (`logs/digest13.log`):
+
+```
+=== 2026-08-01 07:00:15 ===
+Items RSS: 42 | Aprobados: 18 | Seleccionados: 12
+Artículos descargados: 11 | Párrafos generados: 11
+Tokens:
+  llama-3.3-70b-versatile: 45,230 tokens (12 llamadas)
+  openai/gpt-oss-120b: 8,450 tokens (1 llamada)
+  Total: 53,680 tokens
+Estado: OK — correo enviado a rodneyara@gmail.com
+```
+
+El log se acumula (no se sobreescribe) y es gitignored. Ideal para monitorear el consumo de tokens a lo largo del tiempo.
 
 ### Alternativa: cron
 
