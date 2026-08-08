@@ -16,10 +16,13 @@ from text_cleaner import strip_markdown
 from tts_engine import synthesize
 from email_sender import send
 from llm import get_token_usage
+from seen_store import SeenStore
 
 DATE_STAMP = date.today().strftime("%Y.%m.%d")
 MP3_FILENAME = f"digest13.{DATE_STAMP}.mp3"
 HTML_FILENAME = f"digest13.{DATE_STAMP}.html"
+SEEN_DB = PROJECT_ROOT / ".cache" / "seen.sqlite3"
+SEEN_RETENTION_DAYS = 30
 
 SECTION_ORDER = [
     "MUNDO",
@@ -45,7 +48,7 @@ def _write_run_log(status: str, stats: dict) -> None:
     LOG_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [f"=== {timestamp} ==="]
-    lines.append(f"Items RSS: {stats.get('rss', 0)} | Aprobados: {stats.get('approved', 0)} | Seleccionados: {stats.get('selected', 0)}")
+    lines.append(f"Items RSS: {stats.get('rss', 0)} | Ya enviados (descartados): {stats.get('blocked', 0)} | Aprobados: {stats.get('approved', 0)} | Seleccionados: {stats.get('selected', 0)}")
     lines.append(f"Artículos descargados: {stats.get('downloaded', 0)} | Párrafos generados: {stats.get('paragraphs', 0)}")
     token_usage = get_token_usage()
     if token_usage:
@@ -179,12 +182,24 @@ def assemble(items: list) -> str:
 
 
 def main() -> None:
-    stats = {"rss": 0, "approved": 0, "selected": 0, "downloaded": 0, "paragraphs": 0}
+    stats = {"rss": 0, "blocked": 0, "approved": 0, "selected": 0, "downloaded": 0, "paragraphs": 0}
+
+    store = SeenStore(SEEN_DB)
+    store.prune(SEEN_RETENTION_DAYS)
 
     print("Leyendo feeds RSS...")
     items = fetch_items()
     stats["rss"] = len(items)
     print(f"  {len(items)} items obtenidos")
+
+    store.note_seen(items, date.today().isoformat())
+    blocked = [it for it in items if store.is_blocked(it.url, it.title, it.source)]
+    stats["blocked"] = len(blocked)
+    if blocked:
+        print(f"  {len(blocked)} items ya enviados en un digest anterior — descartados")
+        for it in blocked:
+            print(f"    → {it.title[:80]}")
+    items = [it for it in items if it not in blocked]
 
     print("Filtrando por relevancia...")
     approved = filter_items(items)
@@ -272,6 +287,8 @@ def main() -> None:
     print("Enviando correo electrónico...")
     send(html_content, audio_bytes, DATE_STAMP)
 
+    store.mark_sent(paragraphs, date.today().isoformat())
+
     print("Limpiando archivos temporales...")
     mp3_path.unlink(missing_ok=True)
     html_path.unlink(missing_ok=True)
@@ -280,6 +297,7 @@ def main() -> None:
     if gate_failed:
         status += " (SIN revisión editorial: el editor no respondió)"
     _write_run_log(status, stats)
+    store.close()
     print("¡Listo! Digest 13 entregado.")
 
 

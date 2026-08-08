@@ -22,7 +22,8 @@ flowchart TD
 
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
-            C --> D["🤖 Groq API (llama-3.3-70b-versatile)<br/>Curación de volumen"]:::api
+            C --> C1["🗄️ SQLite seen-store<br/>(bloquea ya enviados, `.cache/seen.sqlite3`)"]:::process
+            C1 --> D["🤖 Groq API (llama-3.3-70b-versatile)<br/>Curación de volumen"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
             D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
             D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
@@ -260,6 +261,14 @@ pocas noticias relevantes; `filter_items()` avisa con un resumen `⚠ N/M respue
 ### Etapa 2 — Deduplicación por evento (`relevance.py: deduplicate_by_event`)
 
 Una sola llamada LLM recibe los top-20 candidatos (ID, sección, fuente, título, fragmento de resumen) y responde `GRUPO: [IDs]` por cada grupo de items que cubren el **mismo evento**. Se conserva el de mayor puntaje de cada grupo. Esto resuelve el caso de varias fuentes RSS cubriendo la misma noticia de última hora con redacción distinta (p. ej. la crisis de Ceuta en BBC + Guardian). Un filtro determinista por similitud de keywords (umbral 0.65) en la selección complementa para duplicados casi idénticos.
+
+**Estas etapas (1 y 2) son intra-corrida** y no resuelven la repetición *de un día para otro*: la ventana RSS de 48h re-introduce artículos del día anterior en el feed. La memoria persistente está en `seen_store.py`:
+
+- **`mark_sent`** (solo tras un envío de correo exitoso, `main.py` marca los items que de verdad llegaron al digest) registra la URL normalizada y el título normalizado.
+- **`is_blocked`** se consulta justo después del agregador y **antes** del filtro LLM (ahorra tokens de `FILTER_MODEL`): bloquea si la URL normalizada ya fue enviada, o si la misma fuente publicó la misma noticia con una URL nueva (clave `(source, title_key)`).
+- Normalización de URL: `http`/`https` y `www.` unificados, path en minúsculas, query/fragmento descartados (los `?utm_*` de tracking no cuelan duplicados).
+- **`note_seen`** registra todo lo que el pipeline ve (auditoría) pero **nunca bloquea**: una noticia que un día no alcanzó cuota o falló en la descarga puede aparecer otro día sin problema.
+- `prune(30 días)` en cada arranque mantiene la tabla chica. Base en `.cache/seen.sqlite3` (gitignoreada).
 
 ### Etapa 3 — Selección por cuotas (`main.py: select_by_quota`)
 

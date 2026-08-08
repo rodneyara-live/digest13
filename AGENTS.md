@@ -17,10 +17,11 @@
 - **Never put a reasoning model in `FILTER_MODEL`/`LLM_MODEL`:** measured +41% tokens per call for identical work (`gpt-oss-20b` 1,173 vs `llama-3.1-8b-instant` 832) from hidden chain-of-thought. If unavoidable, `reasoning_effort="low"` is what actually reduces generation; `include_reasoning=False` only hides it from the response.
 - `EDITORIAL_MODEL` is a reasoning model: it spends tokens on hidden chain-of-thought before answering, so its `max_tokens` must stay generous or it returns empty/truncated text — `llm.py` logs `⚠ TRUNCADO` when `finish_reason == "length"` to catch this without guessing. Current values: relevance=600, dedup=600, paragraph=800, editorial review=8000 — `LLM_MODEL` doesn't need the headroom but keeps the same generous caps for margin.
 - One daily run uses ~52K combined (~34K relevance, ~14K paragraphs, ~1.5K dedup, ~3.5K editorial). `call_llm` retries on 429 only for transient rate limits; TPD exhaustion auto-switches to fallback model (no futile retries on exhausted model)
+- **Cross-day dedup via SQLite** (`seen_store.py`, DB at `.cache/seen.sqlite3`, gitignored): the 48h RSS window re-introduces yesterday's articles, so `main.py` blocks items already **sent** in a previous digest before the relevance filter (saves FILTER_MODEL tokens too). Key = normalized URL (scheme http/https, `www.`, case and path unified; query/fragment dropped) OR `(source, title_key)` (normalized title) for the same story re-published under a new URL. Only delivered items block (`mark_sent` runs after a successful send); everything fetched is recorded (`note_seen`) for audit but never blocks, so a story that missed the quota or a failed download can still appear another day. Rows pruned after 30 days. Intra-run dedup (LLM `deduplicate_by_event` + keyword Jaccard) is unchanged.
 
 ## Architecture (from BLUEPRINT.md)
 
-- Python 3.10+ pipeline: RSS feeds → relevance scoring (1-5) → LLM dedup by event → quota-based selection (with a second, deterministic keyword-similarity dedup) → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
+- Python 3.10+ pipeline: RSS feeds → SQLite seen-store blocks already-sent articles → relevance scoring (1-5) → LLM dedup by event → quota-based selection (with a second, deterministic keyword-similarity dedup) → full-article fetch → paragraph generation → editorial review → HTML generation → `edge-tts` MP3 synthesis → MIME email via SMTP
 - Selection quotas (`main.py`): Costa Rica min 3 / max 5, Mundo max 6, Tecnología max 5, total max 15 items (~10-12 min audio); `_is_duplicate()` skips candidates with ≥0.65 keyword-Jaccard similarity to an already-selected item
 - Editorial review uses a separate reasoning model (`EDITORIAL_MODEL`, default `openai/gpt-oss-120b`) — gives it a distinct daily quota
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
@@ -45,6 +46,7 @@
 - `editorial_review.py` — strict quality gate (`MAX_REVIEW_CHARS=24000`, max_tokens=8000, `EDITORIAL_MODEL`); RECHAZADO stops the pipeline. Trim only on item boundaries (`_fit()`) and match verdicts via `_verdict()`/`is_rejection()` — a raw char cut invents defects, a bare `startswith` leaves the gate open
 - `llm.py` — Groq client, retries on transient 429 only, `model` param per call
 - `num2words.py` — numbers → Spanish words (`int_to_words`, `number_to_words`, `numbers_to_words`, CLI worker); wired into `text_cleaner.strip_markdown()` (TTS only, HTML untouched)
+- `seen_store.py` — SQLite memory of delivered articles (`mark_sent`/`is_blocked`/`note_seen`/`prune`); see the "Cross-day dedup" bullet in State
 - `html_generator.py`, `text_cleaner.py`, `tts_engine.py`, `email_sender.py` — output stage
 
 ## Dependencies
@@ -62,7 +64,7 @@ cp .env.example .env  # fill in GROQ_API_KEY, SMTP_*, EMAIL_*, TTS_VOICE
 
 ## Testing / CI / Lint
 
-None configured. Manual runner: `venv/bin/python tests/test_num2words.py` (pure-local asserts for `num2words.py` + `text_cleaner.py`, no API calls). Needs proper CI/test setup as the project is built.
+None configured. Manual runner: `venv/bin/python tests/test_num2words.py` and `venv/bin/python tests/test_seen_store.py` (pure-local asserts, no API calls). Needs proper CI/test setup as the project is built.
 
 ## .gitignore must cover
 
