@@ -1,5 +1,7 @@
 import re
 
+from num2words import numbers_to_words
+
 
 _CURRENCY_RE = re.compile(
     r"[₡¢]\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(\s+colones)?",
@@ -33,4 +35,5 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r"^_{3,}$", "", text, flags=re.MULTILINE)
     text = re.sub(r"^-{3,}$", "", text, flags=re.MULTILINE)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    text = numbers_to_words(text)
     return text.strip()

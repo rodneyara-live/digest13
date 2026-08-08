@@ -210,6 +210,13 @@ Antes de la síntesis de voz, el texto markdown generado por el LLM se limpia me
 
 Esto evita que el TTS lea en voz alta símbolos de formato.
 
+Además, los números se convierten a letras (solo para TTS, el HTML conserva el texto original) mediante `num2words.py`:
+- `.` o espacio = separador de miles (`2.300.500` → *dos millones trescientos mil quinientos*; `2 300 500` → igual)
+- `,` = decimal (`3,5` → *tres coma cinco*; `29,18%` → *veintinueve coma dieciocho por ciento*)
+- Números puros sin separadores se agrupan de derecha a izquierda en miles (`4000000` → *cuatro millones*)
+- `%` adyacente (pegado o separado) se lee *por ciento*; `₡` ya resuelto por el paso de moneda
+- Se dejan intactos horas (`7:00`), fechas (`07/08/2026`), tokens alfanuméricos (`PM2.5`, `4G`) y números pegados a otra palabra
+
 ---
 
 ## 🎯 Pipeline de Curación (LLM + Cuotas)

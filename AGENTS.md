@@ -44,6 +44,7 @@
 - `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=800); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
 - `editorial_review.py` — strict quality gate (`MAX_REVIEW_CHARS=24000`, max_tokens=8000, `EDITORIAL_MODEL`); RECHAZADO stops the pipeline. Trim only on item boundaries (`_fit()`) and match verdicts via `_verdict()`/`is_rejection()` — a raw char cut invents defects, a bare `startswith` leaves the gate open
 - `llm.py` — Groq client, retries on transient 429 only, `model` param per call
+- `num2words.py` — numbers → Spanish words (`int_to_words`, `number_to_words`, `numbers_to_words`, CLI worker); wired into `text_cleaner.strip_markdown()` (TTS only, HTML untouched)
 - `html_generator.py`, `text_cleaner.py`, `tts_engine.py`, `email_sender.py` — output stage
 
 ## Dependencies
@@ -61,7 +62,7 @@ cp .env.example .env  # fill in GROQ_API_KEY, SMTP_*, EMAIL_*, TTS_VOICE
 
 ## Testing / CI / Lint
 
-None configured. These need to be set up as the project is built.
+None configured. Manual runner: `venv/bin/python tests/test_num2words.py` (pure-local asserts for `num2words.py` + `text_cleaner.py`, no API calls). Needs proper CI/test setup as the project is built.
 
 ## .gitignore must cover
 
@@ -80,7 +81,7 @@ logs/
 
 - LLM prompts (see BLUEPRINT.md) are exact — must be sent verbatim. They live in `relevance.py`, `paragraph_gen.py`, and `editorial_review.py`
 - Each news item title is a hyperlink to the original article (`### [Título](url)`) — Python guarantees exactly one bracket pair regardless of whether the model echoed brackets in its own output
-- Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis; colones (`₡2.300.500`) become `2300500 colones` (thousands dots removed, symbol → word after number)
+- Text cleaned via `text_cleaner.strip_markdown()` before TTS synthesis; numbers are converted to letters via `num2words.py` (`₡2.300.500` → `dos millones trescientos mil quinientos colones`, `29,18%` → `veintinueve coma dieciocho por ciento`). Convention: `.`/space = thousands, `,` = decimal; pure digit runs (`4000000`) group from the right. Hours (`7:00`), dates (`07/08/2026`) and tokens like `PM2.5`/`4G` are left untouched
 - Temp files (MP3, HTML) deleted after successful email send
 - HTML output must embed audio via `cid:audio_resumen_mp3` (attachment, not URL)
 - All news sections: independent, self-contained items; no connective phrases between stories
