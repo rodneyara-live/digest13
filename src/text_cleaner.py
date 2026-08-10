@@ -3,14 +3,20 @@ import re
 from num2words import numbers_to_words
 
 
-_CURRENCY_RE = re.compile(
+_COLONES_RE = re.compile(
     r"[₡¢]\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(\s+colones)?",
     re.IGNORECASE,
 )
 
+_FOREIGN_CURRENCY_RE = re.compile(
+    r"([£$€])\s*(\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,](\d{1,2}))?"
+)
+
+_CURRENCY_WORDS = {"£": "libras", "$": "dólares", "€": "euros"}
+
 
 def _fix_currency(text: str) -> str:
-    def _repl(match: re.Match) -> str:
+    def _colones_repl(match: re.Match) -> str:
         integer = match.group(1).replace(".", "")
         decimal = match.group(2) or ""
         trailing = match.group(3) or ""
@@ -18,7 +24,18 @@ def _fix_currency(text: str) -> str:
         if trailing:
             return f"{num}{trailing}"
         return f"{num} colones"
-    return _CURRENCY_RE.sub(_repl, text)
+    text = _COLONES_RE.sub(_colones_repl, text)
+
+    def _foreign_repl(match: re.Match) -> str:
+        symbol = match.group(1)
+        integer = match.group(2).replace(".", "").replace(",", "")
+        decimal = match.group(3) or ""
+        word = _CURRENCY_WORDS[symbol]
+        if decimal:
+            return f"{integer},{decimal} {word}"
+        return f"{integer} {word}"
+    text = _FOREIGN_CURRENCY_RE.sub(_foreign_repl, text)
+    return text
 
 
 def strip_markdown(text: str) -> str:

@@ -18,7 +18,7 @@ USER_PROMPT = """Evalúa este artículo para el boletín informativo "Digest 13"
 - Noticias universitarias (logros estudiantiles, SINDEU, fedes, boletines)
 - Comunicados de prensa corporativos o contenido promocional
 - Pifias diplomáticas, mapas errados, declaraciones sin efecto
-- Lanzamientos de gadgets de consumo, videojuegos a precio completo
+- Lanzamientos, reseñas y especificaciones de gadgets de consumo (teléfonos, tablets, laptops, smartwatches, auriculares, consolas), videojuegos a precio completo
 - Pseudociencia, medicina alternativa, homeopatía, curación energética, terapias no comprobadas
 - Contenido antivacunas, teorías conspirativas sobre salud
 - Reportajes sobre doulas, parteras o partos no asistidos como alternativa a la atención médica profesional

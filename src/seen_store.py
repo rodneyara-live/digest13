@@ -63,13 +63,13 @@ class SeenStore:
         ukey = _normalize_url(url)
         if not ukey:
             return False
-        sql = "SELECT 1 FROM seen WHERE sent = 1 AND url = ?"
-        params = [ukey]
         tkey = _normalize_title(title)
+        sql = "SELECT 1 FROM seen WHERE sent = 1 AND (url = ?"
+        params = [ukey]
         if tkey and source:
             sql += " OR (source = ? AND title_key = ?)"
             params += [source, tkey]
-        sql += " LIMIT 1"
+        sql += ") LIMIT 1"
         cur = self._conn.execute(sql, params)
         return cur.fetchone() is not None
 
