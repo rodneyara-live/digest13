@@ -6,7 +6,7 @@ from config import EDITORIAL_MODEL
 # run, so it sits well above that: an 8000-char cap left the editor blind to the
 # last third of the report — the entire TECNOLOGÍA section — while still being
 # billed as a full review.
-MAX_REVIEW_CHARS = 24000
+MAX_REVIEW_CHARS = 12000
 
 SYSTEM_PROMPT = """Eres el editor en jefe y ÚLTIMA línea de defensa de calidad del boletín "Digest 13".
 Tu trabajo es RECHAZAR o CORREGIR — no aprobar ciegamente.
@@ -83,7 +83,7 @@ def review(news_text: str) -> str | None:
     answer = call_llm(
         SYSTEM_PROMPT,
         USER_PROMPT.format(news_text=_fit(news_text)),
-        max_tokens=8000,
+        max_tokens=1500,
         temperature=0.2,
         model=EDITORIAL_MODEL,
     )

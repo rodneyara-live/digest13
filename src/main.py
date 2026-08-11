@@ -1,6 +1,8 @@
 import asyncio
 import re
+import socket
 import sys
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
@@ -42,6 +44,34 @@ MIN_ITEMS_FOR_DIGEST = 5  # below this, treat the run as degenerate (e.g. a fall
 
 LOG_DIR = PROJECT_ROOT / "logs"
 RUN_LOG = LOG_DIR / "digest13.log"
+
+CONNECTIVITY_RETRIES = 3
+CONNECTIVITY_DELAY = 600  # 10 minutes
+
+
+def _check_internet() -> bool:
+    """Return True if DNS resolution and a TCP handshake to Groq succeed."""
+    for host in ("api.groq.com", "www.theguardian.com"):
+        try:
+            socket.create_connection((host, 443), timeout=10)
+        except OSError:
+            return False
+    return True
+
+
+def _ensure_connectivity() -> None:
+    """Block until the network is usable, retrying up to CONNECTIVITY_RETRIES times."""
+    for attempt in range(1, CONNECTIVITY_RETRIES + 1):
+        if _check_internet():
+            if attempt > 1:
+                print(f"  Conexión restaurada en el intento {attempt}")
+            return
+        if attempt < CONNECTIVITY_RETRIES:
+            print(f"  Sin conexión (intento {attempt}/{CONNECTIVITY_RETRIES}). Reintentando en {CONNECTIVITY_DELAY // 60} minutos...")
+            time.sleep(CONNECTIVITY_DELAY)
+    print("ERROR: Sin conexión después de varios reintentos")
+    _write_run_log("FALLO — Sin conexión a internet", {})
+    sys.exit(1)
 
 
 def _write_run_log(status: str, stats: dict) -> None:
@@ -184,6 +214,8 @@ def assemble(items: list) -> str:
 def main() -> None:
     stats = {"rss": 0, "blocked": 0, "approved": 0, "selected": 0, "downloaded": 0, "paragraphs": 0}
 
+    _ensure_connectivity()
+
     store = SeenStore(SEEN_DB)
     store.prune(SEEN_RETENTION_DAYS)
 
@@ -256,24 +288,34 @@ def main() -> None:
 
     (PROJECT_ROOT / "debug_news.txt").write_text(news_text, encoding="utf-8")
 
-    print("Revisión editorial...")
+    print("Revisión editorial (por sección)...")
     editorial_blocked = False
-    gate_failed = False
-    review_result = review(news_text)
-    if review_result:
-        print(f"  Pendiente de corrección: {review_result[:200]}")
-        if is_rejection(review_result):
+    gate_failed_sections = []
+    sections = [s for s in news_text.split("\n## ") if s.strip()]
+    for i, section in enumerate(sections):
+        section_header = section.split("\n", 1)[0].strip()
+        print(f"  Revisando {section_header}...")
+        section_text = f"## {section}"
+        result = review(section_text)
+        if result is None:
+            print(f"    APROBADO")
+        elif is_rejection(result):
             editorial_blocked = True
-            print("  ✖ DIGEST RECHAZADO por el editor — no se envía")
-        elif is_gate_failure(review_result):
-            gate_failed = True
-            print("  ⚠ el editor no respondió — el digest se envía SIN revisar")
-    else:
-        print("  APROBADO")
+            print(f"    ✖ RECHAZADO — {result[:200]}")
+        elif is_gate_failure(result):
+            gate_failed_sections.append(section_header)
+            print(f"    ⚠ editor no respondió")
+        else:
+            print(f"    Correcciones: {result[:200]}")
+        if i < len(sections) - 1:
+            time.sleep(5)
 
     if editorial_blocked:
         _write_run_log("FALLO — Digest rechazado por editor", stats)
         sys.exit(1)
+
+    if gate_failed_sections:
+        print(f"  ⚠ Editor no respondió para: {', '.join(gate_failed_sections)} — se envía SIN revisar esas secciones")
 
     html_path = PROJECT_ROOT / HTML_FILENAME
     print("Construyendo HTML...")
@@ -294,8 +336,8 @@ def main() -> None:
     html_path.unlink(missing_ok=True)
 
     status = f"OK — correo enviado a {EMAIL_TO}"
-    if gate_failed:
-        status += " (SIN revisión editorial: el editor no respondió)"
+    if gate_failed_sections:
+        status += f" (SIN revisión editorial: {', '.join(gate_failed_sections)})"
     _write_run_log(status, stats)
     store.close()
     print("¡Listo! Digest 13 entregado.")
