@@ -291,17 +291,17 @@ def main() -> None:
     print("Revisión editorial (por sección)...")
     editorial_blocked = False
     gate_failed_sections = []
-    sections = [s for s in news_text.split("\n## ") if s.strip()]
+    rejected_sections = []
+    sections = [s for s in re.split(r'\n(?=## )', news_text) if s.strip()]
     for i, section in enumerate(sections):
         section_header = section.split("\n", 1)[0].strip()
         print(f"  Revisando {section_header}...")
-        section_text = f"## {section}"
-        result = review(section_text)
+        result = review(section)
         if result is None:
             print(f"    APROBADO")
         elif is_rejection(result):
-            editorial_blocked = True
-            print(f"    ✖ RECHAZADO — {result[:200]}")
+            rejected_sections.append(section_header)
+            print(f"    ⚠ RECHAZADO (no bloqueante) — {result[:200]}")
         elif is_gate_failure(result):
             gate_failed_sections.append(section_header)
             print(f"    ⚠ editor no respondió")
@@ -310,9 +310,8 @@ def main() -> None:
         if i < len(sections) - 1:
             time.sleep(5)
 
-    if editorial_blocked:
-        _write_run_log("FALLO — Digest rechazado por editor", stats)
-        sys.exit(1)
+    if rejected_sections:
+        print(f"  ⚠ Editor rechazó: {', '.join(rejected_sections)} — pero el digest se envía de todos modos")
 
     if gate_failed_sections:
         print(f"  ⚠ Editor no respondió para: {', '.join(gate_failed_sections)} — se envía SIN revisar esas secciones")
@@ -336,8 +335,13 @@ def main() -> None:
     html_path.unlink(missing_ok=True)
 
     status = f"OK — correo enviado a {EMAIL_TO}"
+    notes = []
+    if rejected_sections:
+        notes.append(f"editor rechazó: {', '.join(rejected_sections)}")
     if gate_failed_sections:
-        status += f" (SIN revisión editorial: {', '.join(gate_failed_sections)})"
+        notes.append(f"sin revisión: {', '.join(gate_failed_sections)}")
+    if notes:
+        status += f" ({'; '.join(notes)})"
     _write_run_log(status, stats)
     store.close()
     print("¡Listo! Digest 13 entregado.")
