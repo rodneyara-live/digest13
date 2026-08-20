@@ -68,7 +68,7 @@ The pipeline is a strict linear sequence, each stage in its own module, orchestr
    HECHO/CONTEXTO/IMPLICACIÓN paragraph. The model only writes the title text; a regex
    (`^###\s*\[?(.+?)\]?\s*$`) then injects the real `Item.url` into it as `### [título](url)`, tolerating
    whether the model wrapped its own title in brackets or not — this guarantees exactly one bracket pair
-   and a real URL regardless of what the model did. Input truncated to 2500 chars, `max_tokens=800`.
+   and a real URL regardless of what the model did. Input truncated to 2500 chars, `max_tokens=2500`.
    Banned phrases ("es importante", "genera debate", etc.) are enforced by the prompt.
 7. **`editorial_review.review()`** — strict quality gate (single LLM call, `MAX_REVIEW_CHARS=24000`,
    `max_tokens=8000`, uses `EDITORIAL_MODEL`). The input cap must stay comfortably above a full digest

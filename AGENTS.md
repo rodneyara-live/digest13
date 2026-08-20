@@ -42,7 +42,7 @@
 - `web_searcher.py` — RSS aggregation (6 items/feed max, articles older than 48h UTC are skipped)
 - `relevance.py` — LLM scoring filter (PUNTAJE 1-5, reclassifies section) + `deduplicate_by_event()` (single LLM call groups same-event stories before selection); unparseable answers are logged as `MALFORMADO`, never silently treated as `RECHAZADO`
 - `article_fetcher.py` — `requests` + manual gzip/br decompression + `trafilatura` (Semanario needs this)
-- `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=800); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
+- `paragraph_gen.py` — HECHO+CONTEXTO+IMPLICACIÓN paragraph (max_tokens=2500); regex injects the real `Item.url` into the title, tolerating whether or not the model wrapped it in brackets itself
 - `editorial_review.py` — strict quality gate (`MAX_REVIEW_CHARS=24000`, max_tokens=8000, `EDITORIAL_MODEL`); RECHAZADO stops the pipeline. Trim only on item boundaries (`_fit()`) and match verdicts via `_verdict()`/`is_rejection()` — a raw char cut invents defects, a bare `startswith` leaves the gate open
 - `llm.py` — Groq client, retries on transient 429 only, `model` param per call
 - `num2words.py` — numbers → Spanish words (`int_to_words`, `number_to_words`, `numbers_to_words`, CLI worker); wired into `text_cleaner.strip_markdown()` (TTS only, HTML untouched)

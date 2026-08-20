@@ -300,7 +300,7 @@ Uso de `requests` con headers de navegador y `Accept-Encoding: gzip, deflate, br
 [Párrafo de 3 a 5 oraciones: HECHO con cifras/nombres/fechas, CONTEXTO, IMPLICACIÓN.]
 ```
 
-El LLM genera solo título y párrafo — nunca escribe la URL. En Python, una regex captura el texto del título de la línea `###` **tolerando que el modelo lo haya envuelto en corchetes o no** (`^###\s*\[?(.+?)\]?\s*$`) y lo reconstruye como `### [título](url)` con la URL real del `Item`. Esto evita tanto URLs inventadas por el modelo como corchetes duplicados (`[[título]]`) si el modelo copió el formato de ejemplo literalmente. Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=800`, temperatura 0.4.
+El LLM genera solo título y párrafo — nunca escribe la URL. En Python, una regex captura el texto del título de la línea `###` **tolerando que el modelo lo haya envuelto en corchetes o no** (`^###\s*\[?(.+?)\]?\s*$`) y lo reconstruye como `### [título](url)` con la URL real del `Item`. Esto evita tanto URLs inventadas por el modelo como corchetes duplicados (`[[título]]`) si el modelo copió el formato de ejemplo literalmente. Prohibido: "es importante", "genera debate", "situación delicada", "es un logro/paso". Solo datos. Entrada truncada a 2500 caracteres, `max_tokens=2500`, temperatura 0.4.
 
 ### Etapa 6 — Revisión editorial (`editorial_review.py`)
 
