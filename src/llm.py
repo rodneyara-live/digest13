@@ -31,7 +31,7 @@ def _build_fallback_chain() -> dict[str, str]:
         # with no model for stage 1 nothing gets approved and the run aborts, so
         # spending paragraph headroom beats producing no digest. It defaults to the
         # volume fallback itself, so this is the only way it gets a backup at all.
-        # 8b → 70b → 8b is a cycle; _first_available's `seen` guard terminates it.
+        # allam → qwen → allam is a cycle; _first_available's `seen` guard terminates it.
         FILTER_MODEL: LLM_MODEL,
         LLM_MODEL: VOLUME_FALLBACK,
         EDITORIAL_MODEL: REASONING_FALLBACK,

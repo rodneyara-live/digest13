@@ -102,18 +102,18 @@ client (`_get_client()`, built once and reused). `model` defaults to `LLM_MODEL`
 **Three models, three independent daily quotas**, assigned per stage by how much that stage's quality
 matters — see `BLUEPRINT.md`'s "Pipeline de Curación" table for the authoritative per-stage breakdown:
 
-- `FILTER_MODEL` (default `llama-3.1-8b-instant`, non-reasoning, 500K tokens/day) — passed explicitly via
+- `FILTER_MODEL` (default `allam-2-7b`, non-reasoning) — passed explicitly via
   `model=FILTER_MODEL` in `relevance.py` (stages 1-2). This is the highest-volume stage by far (one call
   per RSS item, ~44/day, ~65% of the run's tokens) and the cheapest judgment: scoring 1-5 against an
-  explicit rubric. It lives on the 500K quota precisely so it can't cannibalize the paragraph budget.
-- `LLM_MODEL` (default `llama-3.3-70b-versatile`, non-reasoning, 100K tokens/day) — the `call_llm` default,
+  explicit rubric.
+- `LLM_MODEL` (default `qwen/qwen3.6-27b`, reasoning) — the `call_llm` default,
   so only `paragraph_gen.py` (stage 5) uses it implicitly. Paragraph writing is what determines whether the
-  digest reads well, so it gets the strongest model with ~7x headroom (~14K of 100K per run).
+  digest reads well, so it gets the strongest model.
 - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, 200K tokens/day) — passed explicitly via
   `model=EDITORIAL_MODEL` only in `editorial_review.py` (stage 6).
 
-**Never set a reasoning model as `FILTER_MODEL`/`LLM_MODEL`.** Measured: a run with `gpt-oss-20b` as the
-volume model spent 1,173 tokens/call vs 832 for `llama-3.1-8b-instant` on identical work (+41%), all of it
+**Never set a reasoning model as `FILTER_MODEL`.** Measured: a run with `gpt-oss-20b` as the
+volume model spent 1,173 tokens/call vs 832 for `allam-2-7b` on identical work (+41%), all of it
 hidden chain-of-thought. If it's ever unavoidable, `reasoning_effort="low"` is the parameter that actually
 suppresses that generation — `include_reasoning=False` only hides it from the response.
 
@@ -131,8 +131,8 @@ no reliable way to infer the caller's quota from the shape of the `model` argume
 previous if-chain did. Self-mappings are filtered out, since `FILTER_MODEL` defaults to `VOLUME_FALLBACK`.
 - `FILTER_MODEL` → `LLM_MODEL` — falls *up* on purpose: with no stage-1 model nothing gets approved and
   `main()` aborts, so spending paragraph headroom beats shipping nothing. This makes the volume chain a
-  cycle (8b → 70b → 8b); `_first_available()`'s `seen` set is what terminates it.
-- `LLM_MODEL` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+  cycle (allam → qwen → allam); `_first_available()`'s `seen` set is what terminates it.
+- `LLM_MODEL` → `allam-2-7b` (volume fallback, non-reasoning)
 - `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
 
 Exhaustion is remembered for the rest of the process in `llm.py`'s `_exhausted` set, and announced once

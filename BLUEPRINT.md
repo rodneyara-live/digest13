@@ -23,7 +23,7 @@ flowchart TD
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
             C --> C1["🗄️ SQLite seen-store<br/>(bloquea ya enviados, `.cache/seen.sqlite3`)"]:::process
-            C1 --> D["🤖 Groq API (llama-3.3-70b-versatile)<br/>Curación de volumen"]:::api
+            C1 --> D["🤖 Groq API (allam-2-7b / qwen3.6-27b)<br/>Curación de volumen"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
             D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
             D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
@@ -62,16 +62,16 @@ flowchart TD
 
 * **Servicios Externos:**
 * API Key de Groq (Gratuito / Sin prepago necesario). Tres modelos con cuotas diarias **independientes**, asignados por etapa según cuánto importa la calidad de esa etapa:
-  * `llama-3.1-8b-instant` (`FILTER_MODEL`, no-reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup) — **500K tokens/día**.
-  * `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) solo para redactar párrafos, etapa 5 — **100K tokens/día**.
-  * `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) solo para la revisión editorial final (etapa 6) — **200K tokens/día**.
-  Un run diario consume ~52K en total entre los tres. El reparto no es arbitrario: la etapa 1 hace una llamada por item (~44/día, ~34K tokens, el ~65% del gasto) y es la más barata conceptualmente — clasificar 1-5 contra una rúbrica explícita. Dejarla en el modelo de 100K consumía la mitad de esa cuota diaria en una sola corrida, así que cualquier prueba o reintento agotaba el 70B y degradaba justo la redacción. Con el reparto actual el 70B usa ~14K de sus 100K.
+  * `allam-2-7b` (`FILTER_MODEL`, no-reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup).
+  * `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) solo para redactar párrafos, etapa 5.
+  * `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) solo para la revisión editorial final (etapa 6).
+  Un run diario consume ~52K en total entre los tres. El reparto no es arbitrario: la etapa 1 hace una llamada por item (~44/día, el ~65% del gasto) y es la más barata conceptualmente — clasificar 1-5 contra una rúbrica explícita.
 * **Fallback automático:** si un modelo agota su TPD (tokens per day), `call_llm()` cambia automáticamente al modelo de respaldo y **recuerda el agotamiento por el resto de la corrida** (`_exhausted` en `llm.py`), en vez de reintentar el modelo muerto en cada llamada. La cadena es explícita en `FALLBACK_CHAIN`:
   * `FILTER_MODEL` → `LLM_MODEL` (cae *hacia arriba*: sin modelo en la etapa 1 no se aprueba nada y la corrida aborta, así que gastar margen de párrafos es preferible a no publicar)
-  * `LLM_MODEL` → `llama-3.1-8b-instant` (500K TPD, non-reasoning, 840 TPS)
+  * `LLM_MODEL` → `allam-2-7b` (volume fallback, non-reasoning)
   * `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
   Configurable via `FILTER_MODEL`, `VOLUME_FALLBACK` y `REASONING_FALLBACK` en `.env`.
-* **No usar modelos de razonamiento en `FILTER_MODEL` ni `LLM_MODEL`.** Medido: una corrida con `gpt-oss-20b` como modelo de volumen gastó 1,173 tokens/llamada vs 832 de `llama-3.1-8b-instant` para el mismo trabajo (+41%), por la cadena de pensamiento oculta. Si alguna vez hiciera falta, el parámetro que realmente reduce esa generación es `reasoning_effort="low"` — `include_reasoning=False` solo la oculta de la respuesta.
+* **No usar modelos de razonamiento en `FILTER_MODEL`.** Medido: una corrida con `gpt-oss-20b` como modelo de volumen gastó 1,173 tokens/llamada vs 832 de un modelo no-reasoning para el mismo trabajo (+41%), por la cadena de pensamiento oculta. Si alguna vez hiciera falta, el parámetro que realmente reduce esa generación es `reasoning_effort="low"` — `include_reasoning=False` solo la oculta de la respuesta.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -116,9 +116,9 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 ```ini
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
-FILTER_MODEL="llama-3.1-8b-instant"      # etapas 1-2: clasificar (500K TPD)
-LLM_MODEL="llama-3.3-70b-versatile"      # etapa 5: redactar párrafos (100K TPD)
-EDITORIAL_MODEL="openai/gpt-oss-120b"    # etapa 6: revisión editorial (200K TPD)
+FILTER_MODEL="allam-2-7b"                # etapas 1-2: clasificar (non-reasoning)
+LLM_MODEL="qwen/qwen3.6-27b"            # etapa 5: redactar párrafos (reasoning)
+EDITORIAL_MODEL="openai/gpt-oss-120b"    # etapa 6: revisión editorial (reasoning)
 
 # Configuración de la Voz (TTS)
 TTS_VOICE="es-CR-MariaNeural"
@@ -226,8 +226,8 @@ El pipeline usa tres modelos de Groq, cada uno con su propia cuota diaria, para 
 
 | Modelo | Uso | Etapas | `max_tokens` |
 |--------|-----|--------|--------------|
-| `llama-3.1-8b-instant` (`FILTER_MODEL`, no-reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
-| `llama-3.3-70b-versatile` (`LLM_MODEL`, no-reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
+| `allam-2-7b` (`FILTER_MODEL`, no-reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
+| `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
 | `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 8000 |
 
 `call_llm` en `llm.py` acepta `model` por llamada (default `LLM_MODEL`); `relevance.py` pasa explícitamente `model=FILTER_MODEL` y `editorial_review.py` pasa `model=EDITORIAL_MODEL`, así que solo `paragraph_gen.py` usa el default. Como `gpt-oss-120b` es un modelo *reasoning* que gasta tokens en cadena de pensamiento oculta antes de responder, su `max_tokens` debe ser generoso o la respuesta llega vacía o truncada — `llm.py` loguea `⚠ TRUNCADO` cuando `finish_reason == "length"` para detectar esto sin adivinar. Los modelos no-reasoning no tienen ese costo oculto, pero se les dejan los mismos límites generosos por margen, no por necesidad. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles y se recuerda por el resto de la corrida.
@@ -507,7 +507,7 @@ cat logs/failures.log
 Items RSS: 42 | Aprobados: 18 | Seleccionados: 12
 Artículos descargados: 11 | Párrafos generados: 11
 Tokens:
-  llama-3.3-70b-versatile: 45,230 tokens (12 llamadas)
+  qwen/qwen3.6-27b: 45,230 tokens (12 llamadas)
   openai/gpt-oss-120b: 8,450 tokens (1 llamada)
   Total: 53,680 tokens
 Estado: OK — correo enviado a rodneyara@gmail.com
