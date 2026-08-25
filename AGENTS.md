@@ -5,7 +5,7 @@
 **Pipeline implemented in `src/`.** Single source of truth for design intent: `BLUEPRINT.md`. Read it before modifying the pipeline.
 
 - LLM backend: **Groq**, three models with independent daily quotas, assigned per stage by how much that stage's quality matters — see `BLUEPRINT.md` "Pipeline de Curación" table for the authoritative breakdown
-  - `FILTER_MODEL` (default `allam-2-7b`, non-reasoning) — stages 1, 2 (relevance, dedup): the highest-volume, cheapest-judgment stages, ~44 calls/day
+  - `FILTER_MODEL` (default `openai/gpt-oss-20b`, reasoning) — stages 1, 2 (relevance, dedup): the highest-volume, cheapest-judgment stages, ~44 calls/day
   - `LLM_MODEL` (default `qwen/qwen3.6-27b`, reasoning) — stage 5 (paragraph) only: the stage that defines the digest's quality
   - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*) — stage 6 (editorial review) only
 - Env key: `GROQ_API_KEY`; `call_llm(..., model=...)` picks the model per call, defaults to `LLM_MODEL`
@@ -14,7 +14,7 @@
   - `LLM_MODEL` → `allam-2-7b` (non-reasoning) — falls back to volume fallback
   - `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
   Configurable via `FILTER_MODEL` / `VOLUME_FALLBACK` / `REASONING_FALLBACK` in `.env`
-- **Never put a reasoning model in `FILTER_MODEL`:** measured +41% tokens per call for identical work (`gpt-oss-20b` 1,173 vs `allam-2-7b` 832) from hidden chain-of-thought. If unavoidable, `reasoning_effort="low"` is what actually reduces generation; `include_reasoning=False` only hides it from the response.
+- **`FILTER_MODEL` uses `openai/gpt-oss-20b` (reasoning):** all non-reasoning models available on Groq (`allam-2-7b`) were too small to follow the classification instructions correctly (misclassified Costa Rica news as MUNDO). `openai/gpt-oss-20b` uses ~883 tokens/call (~39K/day) and classifies correctly. Its 200K TPD quota is sufficient.
 - `EDITORIAL_MODEL` is a reasoning model: it spends tokens on hidden chain-of-thought before answering, so its `max_tokens` must stay generous or it returns empty/truncated text — `llm.py` logs `⚠ TRUNCADO` when `finish_reason == "length"` to catch this without guessing. Current values: relevance=600, dedup=600, paragraph=800, editorial review=8000 — `LLM_MODEL` doesn't need the headroom but keeps the same generous caps for margin.
 - One daily run uses ~52K combined (~34K relevance, ~14K paragraphs, ~1.5K dedup, ~3.5K editorial). `call_llm` retries on 429 only for transient rate limits; TPD exhaustion auto-switches to fallback model (no futile retries on exhausted model)
 - **Cross-day dedup via SQLite** (`seen_store.py`, DB at `.cache/seen.sqlite3`, gitignored): the 48h RSS window re-introduces yesterday's articles, so `main.py` blocks items already **sent** in a previous digest before the relevance filter (saves FILTER_MODEL tokens too). Key = normalized URL (scheme http/https, `www.`, case and path unified; query/fragment dropped) OR `(source, title_key)` (normalized title) for the same story re-published under a new URL. Only delivered items block (`mark_sent` runs after a successful send); everything fetched is recorded (`note_seen`) for audit but never blocks, so a story that missed the quota or a failed download can still appear another day. Rows pruned after 30 days. Intra-run dedup (LLM `deduplicate_by_event` + keyword Jaccard) is unchanged.

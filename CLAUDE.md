@@ -102,20 +102,21 @@ client (`_get_client()`, built once and reused). `model` defaults to `LLM_MODEL`
 **Three models, three independent daily quotas**, assigned per stage by how much that stage's quality
 matters — see `BLUEPRINT.md`'s "Pipeline de Curación" table for the authoritative per-stage breakdown:
 
-- `FILTER_MODEL` (default `allam-2-7b`, non-reasoning) — passed explicitly via
+- `FILTER_MODEL` (default `openai/gpt-oss-20b`, reasoning) — passed explicitly via
   `model=FILTER_MODEL` in `relevance.py` (stages 1-2). This is the highest-volume stage by far (one call
-  per RSS item, ~44/day, ~65% of the run's tokens) and the cheapest judgment: scoring 1-5 against an
-  explicit rubric.
+  per RSS item, ~44/day) and the cheapest judgment: scoring 1-5 against an
+  explicit rubric. Non-reasoning models (`allam-2-7b`) were too small to follow the
+  classification instructions correctly.
 - `LLM_MODEL` (default `qwen/qwen3.6-27b`, reasoning) — the `call_llm` default,
   so only `paragraph_gen.py` (stage 5) uses it implicitly. Paragraph writing is what determines whether the
   digest reads well, so it gets the strongest model.
 - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, 200K tokens/day) — passed explicitly via
   `model=EDITORIAL_MODEL` only in `editorial_review.py` (stage 6).
 
-**Never set a reasoning model as `FILTER_MODEL`.** Measured: a run with `gpt-oss-20b` as the
-volume model spent 1,173 tokens/call vs 832 for `allam-2-7b` on identical work (+41%), all of it
-hidden chain-of-thought. If it's ever unavoidable, `reasoning_effort="low"` is the parameter that actually
-suppresses that generation — `include_reasoning=False` only hides it from the response.
+**`FILTER_MODEL` uses `openai/gpt-oss-20b` (reasoning):** all non-reasoning models available on Groq
+(`allam-2-7b`) were too small to follow the classification instructions correctly (misclassified
+Costa Rica news as MUNDO). `openai/gpt-oss-20b` uses ~883 tokens/call (~39K/day) and classifies
+correctly. Its 200K TPD quota is sufficient.
 
 `EDITORIAL_MODEL` burns tokens on hidden chain-of-thought before emitting its answer, so its `max_tokens`
 must stay generous or the response comes back empty/truncated — `llm.py` logs `⚠ TRUNCADO` when

@@ -23,7 +23,7 @@ flowchart TD
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
             C --> C1["🗄️ SQLite seen-store<br/>(bloquea ya enviados, `.cache/seen.sqlite3`)"]:::process
-            C1 --> D["🤖 Groq API (allam-2-7b / qwen3.6-27b)<br/>Curación de volumen"]:::api
+            C1 --> D["🤖 Groq API (gpt-oss-20b / qwen3.6-27b)<br/>Curación de volumen"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
             D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
             D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
@@ -62,7 +62,7 @@ flowchart TD
 
 * **Servicios Externos:**
 * API Key de Groq (Gratuito / Sin prepago necesario). Tres modelos con cuotas diarias **independientes**, asignados por etapa según cuánto importa la calidad de esa etapa:
-  * `allam-2-7b` (`FILTER_MODEL`, no-reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup).
+  * `openai/gpt-oss-20b` (`FILTER_MODEL`, reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup).
   * `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) solo para redactar párrafos, etapa 5.
   * `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) solo para la revisión editorial final (etapa 6).
   Un run diario consume ~52K en total entre los tres. El reparto no es arbitrario: la etapa 1 hace una llamada por item (~44/día, el ~65% del gasto) y es la más barata conceptualmente — clasificar 1-5 contra una rúbrica explícita.
@@ -71,7 +71,7 @@ flowchart TD
   * `LLM_MODEL` → `allam-2-7b` (volume fallback, non-reasoning)
   * `EDITORIAL_MODEL` → `openai/gpt-oss-20b` (200K TPD)
   Configurable via `FILTER_MODEL`, `VOLUME_FALLBACK` y `REASONING_FALLBACK` en `.env`.
-* **No usar modelos de razonamiento en `FILTER_MODEL`.** Medido: una corrida con `gpt-oss-20b` como modelo de volumen gastó 1,173 tokens/llamada vs 832 de un modelo no-reasoning para el mismo trabajo (+41%), por la cadena de pensamiento oculta. Si alguna vez hiciera falta, el parámetro que realmente reduce esa generación es `reasoning_effort="low"` — `include_reasoning=False` solo la oculta de la respuesta.
+* **`FILTER_MODEL` uses `openai/gpt-oss-20b` (reasoning):** all non-reasoning models available on Groq (`allam-2-7b`) were too small to follow the classification instructions correctly (misclassified Costa Rica news as MUNDO). `openai/gpt-oss-20b` uses ~883 tokens/call and classifies correctly.
 * Cuenta SMTP para envío de correos (Brevo, etc.).
 
 ---
@@ -116,7 +116,7 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 ```ini
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
-FILTER_MODEL="allam-2-7b"                # etapas 1-2: clasificar (non-reasoning)
+FILTER_MODEL="openai/gpt-oss-20b"        # etapas 1-2: clasificar (reasoning, ~883 tokens/call)
 LLM_MODEL="qwen/qwen3.6-27b"            # etapa 5: redactar párrafos (reasoning)
 EDITORIAL_MODEL="openai/gpt-oss-120b"    # etapa 6: revisión editorial (reasoning)
 
@@ -226,7 +226,7 @@ El pipeline usa tres modelos de Groq, cada uno con su propia cuota diaria, para 
 
 | Modelo | Uso | Etapas | `max_tokens` |
 |--------|-----|--------|--------------|
-| `allam-2-7b` (`FILTER_MODEL`, no-reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
+| `openai/gpt-oss-20b` (`FILTER_MODEL`, reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
 | `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
 | `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 8000 |
 
