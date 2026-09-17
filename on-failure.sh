@@ -12,3 +12,9 @@ mkdir -p "$LOG_DIR"
 
 EXIT_CODE="${1:-desconocido}"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Digest 13 falló (exit code: ${EXIT_CODE})" >> "$LOG_FILE"
+
+# Enviar correo de notificación de fallo con los registros recientes
+if [ -f "${SCRIPT_DIR}/venv/bin/python" ]; then
+    PYTHONPATH="${SCRIPT_DIR}/src" "${SCRIPT_DIR}/venv/bin/python" "${SCRIPT_DIR}/src/notify_failure.py" "${EXIT_CODE}" >> "$LOG_FILE" 2>&1
+fi
+

@@ -23,7 +23,7 @@ flowchart TD
         subgraph Pipeline ["⚙️ Motor de Procesamiento"]
             B --> C["📡 RSS Feed Aggregator<br/>(Guardian, BBC, Al Jazeera,<br/>Delfino, Semanario, Ars)"]:::process
             C --> C1["🗄️ SQLite seen-store<br/>(bloquea ya enviados, `.cache/seen.sqlite3`)"]:::process
-            C1 --> D["🤖 Groq API (gpt-oss-20b / qwen3.6-27b)<br/>Curación de volumen"]:::api
+            C1 --> D["🤖 Groq API (gpt-oss-20b / qwen3.8-27b)<br/>Curación de volumen"]:::api
             D --> D1["① Filtro de relevancia<br/>(puntaje 1-5 por item)"]:::process
             D1 --> D1a["② Deduplicación por evento<br/>(1 llamada LLM agrupa duplicados)"]:::process
             D1a --> D2["③ Selección por cuotas<br/>(Costa Rica min 3, caps por sección)"]:::process
@@ -63,7 +63,7 @@ flowchart TD
 * **Servicios Externos:**
 * API Key de Groq (Gratuito / Sin prepago necesario). Tres modelos con cuotas diarias **independientes**, asignados por etapa según cuánto importa la calidad de esa etapa:
   * `openai/gpt-oss-20b` (`FILTER_MODEL`, reasoning) para clasificar: etapas 1 (relevancia) y 2 (dedup).
-  * `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) solo para redactar párrafos, etapa 5.
+  * `qwen/qwen3.8-27b` (`LLM_MODEL`, reasoning) solo para redactar párrafos, etapa 5.
   * `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) solo para la revisión editorial final (etapa 6).
   Un run diario consume ~52K en total entre los tres. El reparto no es arbitrario: la etapa 1 hace una llamada por item (~44/día, el ~65% del gasto) y es la más barata conceptualmente — clasificar 1-5 contra una rúbrica explícita.
 * **Fallback automático:** si un modelo agota su TPD (tokens per day), `call_llm()` cambia automáticamente al modelo de respaldo y **recuerda el agotamiento por el resto de la corrida** (`_exhausted` en `llm.py`), en vez de reintentar el modelo muerto en cada llamada. La cadena es explícita en `FALLBACK_CHAIN`:
@@ -117,7 +117,7 @@ Crea un archivo `.env` en la raíz del proyecto. **Nunca subas este archivo al r
 # Configuración de Groq API
 GROQ_API_KEY="gsk_tu_api_key_aqui..."
 FILTER_MODEL="openai/gpt-oss-20b"        # etapas 1-2: clasificar (reasoning, ~883 tokens/call)
-LLM_MODEL="qwen/qwen3.6-27b"            # etapa 5: redactar párrafos (reasoning)
+LLM_MODEL="qwen/qwen3.8-27b"            # etapa 5: redactar párrafos (reasoning)
 EDITORIAL_MODEL="openai/gpt-oss-120b"    # etapa 6: revisión editorial (reasoning)
 
 # Configuración de la Voz (TTS)
@@ -227,7 +227,7 @@ El pipeline usa tres modelos de Groq, cada uno con su propia cuota diaria, para 
 | Modelo | Uso | Etapas | `max_tokens` |
 |--------|-----|--------|--------------|
 | `openai/gpt-oss-20b` (`FILTER_MODEL`, reasoning) | Volumen: clasificar y agrupar | 1 (relevancia), 2 (dedup) | 600 / 600 |
-| `qwen/qwen3.6-27b` (`LLM_MODEL`, reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
+| `qwen/qwen3.8-27b` (`LLM_MODEL`, reasoning) | Calidad: redactar los párrafos | 5 (párrafo) | 800 |
 | `openai/gpt-oss-120b` (`EDITORIAL_MODEL`, reasoning) | Revisión final de todo el informe ya armado | 6 (revisión editorial) | 8000 |
 
 `call_llm` en `llm.py` acepta `model` por llamada (default `LLM_MODEL`); `relevance.py` pasa explícitamente `model=FILTER_MODEL` y `editorial_review.py` pasa `model=EDITORIAL_MODEL`, así que solo `paragraph_gen.py` usa el default. Como `gpt-oss-120b` es un modelo *reasoning* que gasta tokens en cadena de pensamiento oculta antes de responder, su `max_tokens` debe ser generoso o la respuesta llega vacía o truncada — `llm.py` loguea `⚠ TRUNCADO` cuando `finish_reason == "length"` para detectar esto sin adivinar. Los modelos no-reasoning no tienen ese costo oculto, pero se les dejan los mismos límites generosos por margen, no por necesidad. Reintenta en 429 solo para rate limits transitorios; el agotamiento de cuota diaria (TPD) falla rápido sin reintentos fútiles y se recuerda por el resto de la corrida.

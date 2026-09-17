@@ -6,7 +6,7 @@
 
 - LLM backend: **Groq**, three models with independent daily quotas, assigned per stage by how much that stage's quality matters — see `BLUEPRINT.md` "Pipeline de Curación" table for the authoritative breakdown
   - `FILTER_MODEL` (default `openai/gpt-oss-20b`, reasoning) — stages 1, 2 (relevance, dedup): the highest-volume, cheapest-judgment stages, ~44 calls/day
-  - `LLM_MODEL` (default `qwen/qwen3.6-27b`, reasoning) — stage 5 (paragraph) only: the stage that defines the digest's quality
+  - `LLM_MODEL` (default `qwen/qwen3.8-27b`, reasoning) — stage 5 (paragraph) only: the stage that defines the digest's quality
   - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*) — stage 6 (editorial review) only
 - Env key: `GROQ_API_KEY`; `call_llm(..., model=...)` picks the model per call, defaults to `LLM_MODEL`
 - **Fallback chain** (`FALLBACK_CHAIN` in `llm.py`, an explicit dict — not inferred from the shape of the `model` argument): when a model exhausts its TPD, `call_llm()` auto-switches and **remembers it for the rest of the run** (`_exhausted`), instead of re-probing the dead model on every later call
@@ -27,7 +27,7 @@
 - RSS sources: The Guardian, BBC, Al Jazeera, Delfino.cr, Semanario Universidad, Ars Technica
 - **Do not propose new sources without reading BLUEPRINT.md's "Criterio de selección de fuentes".** The feed list is a deliberate editorial decision; Costa Rica having only 2 feeds is intentional. La Nación, El Observador, Monumental and CRHoy were already evaluated and rejected. The criterion filters content engineered to generate division rather than inform — in both political directions — and is what the `SINDEU`/`fedes` rejection line in `relevance.py` actually implements
 - Triggered via systemd `oneshot` service + `OnCalendar=*-*-* 07:00:00` timer with `Persistent=true`
-- Failure alerting: `OnFailure=digest13-notify.service` triggers `on-failure.sh` which logs to `logs/failures.log`
+- Failure alerting: `OnFailure=digest13-notify.service` triggers `on-failure.sh` which logs to `logs/failures.log` and sends an email alert with recent journal/execution logs via `src/notify_failure.py`
 - `main.py` exits with `sys.exit(1)` on critical failures (empty filter, fewer than `MIN_ITEMS_FOR_DIGEST`
   (5) paragraphs generated — not just zero)
 - Error logging: `article_fetcher.py` and `web_searcher.py` log exception type and message on failures

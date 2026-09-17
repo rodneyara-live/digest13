@@ -107,7 +107,7 @@ matters — see `BLUEPRINT.md`'s "Pipeline de Curación" table for the authorita
   per RSS item, ~44/day) and the cheapest judgment: scoring 1-5 against an
   explicit rubric. Non-reasoning models (`allam-2-7b`) were too small to follow the
   classification instructions correctly.
-- `LLM_MODEL` (default `qwen/qwen3.6-27b`, reasoning) — the `call_llm` default,
+- `LLM_MODEL` (default `qwen/qwen3.8-27b`, reasoning) — the `call_llm` default,
   so only `paragraph_gen.py` (stage 5) uses it implicitly. Paragraph writing is what determines whether the
   digest reads well, so it gets the strongest model.
 - `EDITORIAL_MODEL` (default `openai/gpt-oss-120b`, *reasoning*, 200K tokens/day) — passed explicitly via
